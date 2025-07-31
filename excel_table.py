@@ -2,6 +2,7 @@ import pickle
 from PySide6.QtWidgets import (
     QTableWidget, QTableWidgetItem, QMenu, QApplication
 )
+from PySide6.QtGui import QColor  # Add this import
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QAction, QKeySequence
 
@@ -14,11 +15,13 @@ def excel_column_name(n):
     return name
 
 class ExcelTable(QTableWidget):
-    def __init__(self, rows=100, cols=20, auto_save_callback=None):
+    def __init__(self, rows=100, cols=20, name="", auto_save_callback=None):
         super().__init__(rows, cols)
         self.setContextMenuPolicy(Qt.CustomContextMenu)
         self.customContextMenuRequested.connect(self.context_menu)
         self.copied_range = None
+        self.name = name
+        self.currency = name.split("-")[1] if "-" in self.name else ""
         self.auto_save_callback = auto_save_callback
         self._custom_headers = None  # Track custom headers
         self.update_headers()
@@ -27,6 +30,8 @@ class ExcelTable(QTableWidget):
         self.horizontalHeader().setDefaultSectionSize(80)
         self.setSizeAdjustPolicy(QTableWidget.AdjustToContents)
         self.itemChanged.connect(self._on_item_changed)
+        self.cellChanged.connect(self._on_cell_changed)
+        self.user_added_rows = set()  # Track user-added rows
         self.setStyleSheet("""
             QTableWidget {
                 background: #ffffff;
@@ -55,6 +60,12 @@ class ExcelTable(QTableWidget):
                 color: #000;
             }
         """)
+    def _on_cell_changed(self, row, column):
+        """Track user edits by adding row to user_added_rows"""
+        if row not in self.user_added_rows:
+            item = self.item(row, column)
+            if item and (item.flags() & Qt.ItemIsEditable):
+                self.user_added_rows.add(row)
 
     def _on_item_changed(self, item):
         # Only recalculate if debit, credit, or balance in first row changes
@@ -284,48 +295,68 @@ class ExcelTable(QTableWidget):
         credit_sum = 0.0
         debit_col = None
         credit_col = None
+
         for col in range(self.columnCount()):
             header = self.horizontalHeaderItem(col).text().replace(" ", "")
             if "借方" in header:
                 debit_col = col
             if "貸方" in header:
                 credit_col = col
-        for row in range(self.rowCount()):
-            if debit_col is not None:
-                item = self.item(row, debit_col)
+        # Calculate totals
+        if credit_col is not None:  # Always calculate credit sum if column exists
+            for row in range(self.rowCount() - 2):  # Exclude pinned rows
+                credit_item = self.item(row, credit_col)
                 try:
-                    text = item.text().replace(',', '') if item and item.text() else '0'
-                    debit_sum += float(text) if text else 0.0
+                    credit_text = credit_item.text().replace(',', '') if credit_item and credit_item.text() else '0'
+                    credit_sum += float(credit_text) if credit_text else 0.0
                 except Exception:
                     pass
-            if credit_col is not None:
-                item = self.item(row, credit_col)
+
+        if debit_col is not None:  # Only calculate debit sum if column exists
+            for row in range(self.rowCount() - 2):  # Exclude pinned rows
+                debit_item = self.item(row, debit_col)
                 try:
-                    text = item.text().replace(',', '') if item and item.text() else '0'
-                    credit_sum += float(text) if text else 0.0
+                    debit_text = debit_item.text().replace(',', '') if debit_item and debit_item.text() else '0'
+                    debit_sum += float(debit_text) if debit_text else 0.0
                 except Exception:
                     pass
+
         return debit_sum, credit_sum
 
     def paintEvent(self, event):
         super().paintEvent(event)
         # Draw pinned rows at the bottom
-        if hasattr(self, "exchange_rate"):
+        if hasattr(self, "exchange_rate") or True:
             from PySide6.QtGui import QPainter
             painter = QPainter(self.viewport())
-            rect = self.viewport().rect()
-            row_height = self.rowHeight(0)
-            debit_sum, credit_sum = self.sum_columns()
-            # Row 1: sum in sheet currency
-            y1 = rect.bottom() - 2 * row_height
-            painter.fillRect(0, y1, rect.width(), row_height, Qt.lightGray)
-            painter.drawText(10, y1 + row_height // 2 + 5, f"合計: 借方={debit_sum:.2f}  貸方={credit_sum:.2f}  ({getattr(self, 'currency', '')})")
-            # Row 2: sum in HKD
-            y2 = rect.bottom() - row_height
-            painter.fillRect(0, y2, rect.width(), row_height, Qt.gray)
-            rate = getattr(self, "exchange_rate", 1.0)
-            painter.drawText(10, y2 + row_height // 2 + 5, f"合計(HKD): 借方={debit_sum*rate:.2f}  貸方={credit_sum*rate:.2f}")
-            painter.end()
+            try:
+                rect = self.viewport().rect()
+                row_height = self.rowHeight(0)
+                debit_sum, credit_sum = self.sum_columns()
+                balance = debit_sum - credit_sum
+
+                # Format numbers
+                debit_str = "{:,.2f}".format(abs(debit_sum))
+                credit_str = "{:,.2f}".format(abs(credit_sum))
+                balance_str = "({:,.2f})".format(abs(balance)) if balance < 0 else "{:,.2f}".format(balance)
+
+                # Row 1: sum in sheet currency
+                y1 = rect.bottom() - 2 * row_height
+                painter.fillRect(0, y1, rect.width(), row_height, QColor(240, 240, 240))
+                painter.drawText(10, y1 + row_height // 2 + 5,
+                            f"合計({getattr(self, 'currency', '')}): 借方={debit_str}  貸方={credit_str}  餘額={balance_str}")
+
+                # Row 2: sum in HKD
+                y2 = rect.bottom() - row_height
+                painter.fillRect(0, y2, rect.width(), row_height, QColor(220, 220, 220))
+                rate = getattr(self, "exchange_rate", 1.0)
+                hkd_balance = balance * rate
+                hkd_balance_str = "({:,.2f})".format(abs(hkd_balance)) if hkd_balance < 0 else "{:,.2f}".format(hkd_balance)
+                painter.drawText(10, y2 + row_height // 2 + 5,
+                            f"合計(HKD): 借方={debit_sum*rate:,.2f}  貸方={credit_sum*rate:,.2f}  餘額={hkd_balance_str}")
+            finally:
+                painter.end()
+
 
     def _auto_save(self, *_):
         if self.auto_save_callback:
