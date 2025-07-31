@@ -2,10 +2,11 @@ import pickle
 from PySide6.QtWidgets import (
     QMainWindow, QTabWidget, QLineEdit, QLabel, QHBoxLayout, QVBoxLayout,
     QWidget, QFileDialog, QInputDialog, QComboBox, QDialog, QDialogButtonBox,
-    QFormLayout, QDoubleSpinBox, QMessageBox, QStatusBar, QTableWidgetItem
+    QFormLayout, QDoubleSpinBox, QMessageBox, QStatusBar, QTableWidgetItem,
+    QDateEdit
 )
 from PySide6.QtGui import QAction
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QDate
 from PySide6.QtGui import QColor
 from excel_table import ExcelTable
 from datetime import datetime  # Add this import
@@ -18,7 +19,19 @@ class AddSheetDialog(QDialog):
 
         # Sheet type selection
         self.type_combo = QComboBox()
-        self.type_combo.addItems(["Bank Sheet", "商業登記證書", "秘書費", "工資", "審計費"])
+        self.type_combo.addItems([
+            "Bank Sheet", 
+            "銷售收入", 
+            "銷售成本", 
+            "銀行費用", 
+            "利息收入", 
+            "應付費用", 
+            "董事往來",
+            "商業登記證書", 
+            "秘書費", 
+            "工資", 
+            "審計費"
+        ])
         self.layout.addRow("Sheet Type:", self.type_combo)
 
         # Bank-specific fields
@@ -46,9 +59,14 @@ class AddSheetDialog(QDialog):
 
     def get_result(self):
         """Returns (sheet_name, sheet_type) tuple"""
-        if self.type_combo.currentText() == "Bank Sheet":
+        sheet_type = self.type_combo.currentText()
+        
+        if sheet_type == "Bank Sheet":
             return f"{self.bank_name.text().strip()}-{self.currency.text().strip()}", "bank"
-        return self.type_combo.currentText(), "other"
+        elif sheet_type in ["銷售收入", "銷售成本", "銀行費用", "利息收入", "應付費用", "董事往來", "工資", "商業登記證書", "秘書費", "審計費"]:
+            return sheet_type, "aggregate"
+        else:
+            return sheet_type, "other"
 
 class ExcelLike(QMainWindow):
     def __init__(self):
@@ -64,14 +82,26 @@ class ExcelLike(QMainWindow):
         self.company_input = QLineEdit()
         self.company_input.setText("cmpName")
         self.company_input.setPlaceholderText("Enter company name...")
-        self.period_label = QLabel("Period:")
-        self.period_input = QLineEdit()
-        self.period_input.setPlaceholderText("Enter period...")
+        
+        # Period date selectors
+        self.period_from_label = QLabel("Period From:")
+        self.period_from_input = QDateEdit()
+        self.period_from_input.setDate(QDate.currentDate().addMonths(-1))  # Default to last month
+        self.period_from_input.setDisplayFormat("yyyy/MM/dd")
+        self.period_from_input.setCalendarPopup(True)
+        
+        self.period_to_label = QLabel("To:")
+        self.period_to_input = QDateEdit()
+        self.period_to_input.setDate(QDate.currentDate())  # Default to current date
+        self.period_to_input.setDisplayFormat("yyyy/MM/dd")
+        self.period_to_input.setCalendarPopup(True)
 
         self.top_bar.addWidget(self.company_label)
         self.top_bar.addWidget(self.company_input)
-        self.top_bar.addWidget(self.period_label)
-        self.top_bar.addWidget(self.period_input)
+        self.top_bar.addWidget(self.period_from_label)
+        self.top_bar.addWidget(self.period_from_input)
+        self.top_bar.addWidget(self.period_to_label)
+        self.top_bar.addWidget(self.period_to_input)
         self.top_bar.addStretch()
         self.layout.addLayout(self.top_bar)
 
@@ -86,7 +116,8 @@ class ExcelLike(QMainWindow):
         self.cost_sheet = None
         self.user_added_rows = None
         self.company_input.textChanged.connect(self.auto_save)
-        self.period_input.textChanged.connect(self.auto_save)
+        self.period_from_input.dateChanged.connect(self.auto_save)
+        self.period_to_input.dateChanged.connect(self.auto_save)
 
         # Add default sheet
         self._create_bank_sheet("HSBC-USD")
@@ -97,6 +128,9 @@ class ExcelLike(QMainWindow):
         # Connect tab signals
         self.tabs.tabCloseRequested.connect(self.close_tab)
         self.tabs.currentChanged.connect(self._on_tab_changed)  # Add this line
+
+        # Try to auto-load the default company file
+        self._auto_load_company_file()
 
     def _on_tab_changed(self, index):
         if index >= 0:
@@ -174,12 +208,14 @@ class ExcelLike(QMainWindow):
                                 'invoice': invoice_item.text() if invoice_item else "",
                                 'amount': amount_item.text() if amount_item else "",
                                 'source_row': row,
-                                'source_sheet': sheet
+                                'source_sheet': sheet,
+                                'source_label': f"{sheet.name}:{row+1}"  # Add source label
                             })
 
             # Sort by date
             data_rows.sort(key=lambda x: x['date_obj'])
 
+            bank_data_color = QColor(200, 255, 200)  # Light green for bank data
             for i, row_data in enumerate(data_rows):
                 for col, value in [
                     (0, str(i+1)),  # 序號
@@ -188,11 +224,13 @@ class ExcelLike(QMainWindow):
                     (3, row_data['desc']),
                     (4, row_data['invoice']),
                     (amount_col_index, row_data['amount']),
-                    (6, "")  # Balance column
+                    (6, ""),  # Balance column
+                    (7, row_data['source_label'])  # Source column
                 ]:
                     item = QTableWidgetItem(value)
                     item.setFlags(item.flags() & ~Qt.ItemIsEditable)  # Make read-only
-                    item.setBackground(QColor(200, 255, 200))
+                    # Use setData to force background color
+                    item.setData(Qt.BackgroundRole, bank_data_color)
                     current_tab.setItem(i, col, item)
 
             if hasattr(current_tab, 'user_added_rows') and user_data:
@@ -252,12 +290,14 @@ class ExcelLike(QMainWindow):
 
     def _create_regular_sheet(self, name):
         """Create a regular sheet"""
+        print(f"DEBUG CREATE: Creating regular sheet '{name}'")
         columns = ["序 號", "日  期", "對方科目", "摘   要", "借     方", "貸     方", "借或貸", "餘    額", "發票號碼"]
         table = ExcelTable(auto_save_callback=self.auto_save, name=name)
         table.setColumnCount(len(columns))
         table.setHorizontalHeaderLabels(columns)
         self.tabs.addTab(table, name)
         self.sheets.append(table)
+        print(f"DEBUG CREATE: Regular sheet '{name}' created, total sheets: {len(self.sheets)}, total tabs: {self.tabs.count()}")
         return table
 
     def add_sheet(self, name=None, is_bank=False):
@@ -274,15 +314,55 @@ class ExcelLike(QMainWindow):
 
     def add_sheet_dialog(self):
         """Show dialog to add a new sheet"""
+        print(f"DEBUG ADD: Starting add sheet dialog, current tabs: {self.tabs.count()}")
         dlg = AddSheetDialog(self)
         if dlg.exec() == QDialog.Accepted:
             name, sheet_type = dlg.get_result()
+            print(f"DEBUG ADD: Dialog accepted, name='{name}', type='{sheet_type}'")
             if not name:
+                print(f"DEBUG ADD: No name provided, aborting")
                 return
+            
+            new_sheet = None
             if sheet_type == "bank":
-                self._create_bank_sheet(name)
+                print(f"DEBUG ADD: Creating bank sheet: {name}")
+                new_sheet = self._create_bank_sheet(name)
+            elif sheet_type == "aggregate":
+                print(f"DEBUG ADD: Creating aggregate sheet: {name}")
+                # Create the appropriate aggregate sheet
+                if name == "銷售收入":
+                    new_sheet = self._create_sales_sheet()
+                elif name == "銷售成本":
+                    new_sheet = self._create_cost_sheet()
+                elif name == "銀行費用":
+                    new_sheet = self._create_bank_fee_sheet()
+                elif name == "利息收入":
+                    new_sheet = self._create_interest_sheet()
+                elif name == "應付費用":
+                    new_sheet = self._create_payable_sheet()
+                elif name == "董事往來":
+                    new_sheet = self._create_director_sheet()
+                else:
+                    # Create a regular sheet for other aggregate types like 工資, 商業登記證書, etc.
+                    print(f"DEBUG ADD: Creating regular sheet for aggregate type: {name}")
+                    new_sheet = self._create_regular_sheet(name)
             else:
-                self._create_regular_sheet(name)
+                print(f"DEBUG ADD: Creating regular sheet: {name}")
+                new_sheet = self._create_regular_sheet(name)
+            
+            print(f"DEBUG ADD: Sheet created successfully, total tabs now: {self.tabs.count()}")
+            
+            # Switch to the newly added sheet
+            if new_sheet:
+                self.tabs.setCurrentWidget(new_sheet)
+                print(f"DEBUG ADD: Switched to new sheet")
+            
+            # Force auto-save after adding sheet
+            print(f"DEBUG ADD: Triggering auto-save...")
+            self.auto_save()
+            print(f"DEBUG ADD: Add sheet complete")
+        else:
+            print(f"DEBUG ADD: Dialog cancelled")
 
     def delete_sheet(self):
         """Delete the current sheet"""
@@ -304,7 +384,8 @@ class ExcelLike(QMainWindow):
         self.tabs.clear()
         self.sheets = []
         self.company_input.setText("")
-        self.period_input.setText("")
+        self.period_from_input.setDate(QDate.currentDate().addMonths(-1))
+        self.period_to_input.setDate(QDate.currentDate())
         self._create_bank_sheet("HSBC-USD")
         self.sales_sheet = self._create_sales_sheet()
         self.cost_sheet = self._create_cost_sheet()
@@ -363,7 +444,7 @@ class ExcelLike(QMainWindow):
 
     def _create_aggregate_sheet(self, sheet_name, subject_filter, column_title):
         """Common method to create aggregate sheets (sales/cost)"""
-        columns = ["序 號", "日  期", "對方科目", "摘  要", "發票號碼", column_title, "餘    額"]
+        columns = ["序 號", "日  期", "對方科目", "摘  要", "發票號碼", column_title, "餘    額", "來源"]
         table = ExcelTable(auto_save_callback=self.auto_save, name=sheet_name)
         table.setColumnCount(len(columns))
         table.setHorizontalHeaderLabels(columns)
@@ -423,13 +504,14 @@ class ExcelLike(QMainWindow):
                             'invoice': invoice_item.text() if invoice_item else "",
                             'amount': amount_item.text() if amount_item else "",
                             'source_row': row,
-                            'source_sheet': sheet
+                            'source_sheet': sheet,
+                            'source_label': f"{sheet.name}:{row+1}"  # Add source label
                         })
 
         # Sort by date
         data_rows.sort(key=lambda x: x['date_obj'])
 
-        bank_data_color = QColor(200, 255, 200)
+        bank_data_color = QColor(200, 255, 200)  # Light green for bank data
         # Add to table
         for i, row_data in enumerate(data_rows):
             for col, value in [
@@ -439,11 +521,13 @@ class ExcelLike(QMainWindow):
                 (3, row_data['desc']),
                 (4, row_data['invoice']),
                 (amount_col_index, row_data['amount']),
-                (6, "")  # Balance column
+                (6, ""),  # Balance column
+                (7, row_data['source_label'])  # Source column
             ]:
                 item = QTableWidgetItem(value)
                 item.setFlags(item.flags() & ~Qt.ItemIsEditable)  # Make read-only
-                item.setBackground(bank_data_color)  # Set background color
+                # Use setData to force background color
+                item.setData(Qt.BackgroundRole, bank_data_color)
                 table.setItem(i, col, item)
 
 
@@ -475,7 +559,8 @@ class ExcelLike(QMainWindow):
         data = {
             "version": "1.0",
             "company": self.company_input.text(),
-            "period": self.period_input.text(),
+            "period_from": self.period_from_input.date().toString("yyyy/MM/dd"),
+            "period_to": self.period_to_input.date().toString("yyyy/MM/dd"),
             "sheets": []
         }
 
@@ -492,7 +577,14 @@ class ExcelLike(QMainWindow):
 
                 # Get sheet type
                 tab_text = self.tabs.tabText(i)
-                sheet_type = "bank" if "-" in tab_text else "regular"
+                if "-" in tab_text:
+                    sheet_type = "bank"
+                elif tab_text in ["銷售收入", "銷售成本", "銀行費用", "利息收入", "應付費用", "董事往來", "工資", "商業登記證書", "秘書費", "審計費"]:
+                    sheet_type = "aggregate"
+                else:
+                    sheet_type = "regular"
+
+                print(f"DEBUG SAVE: Sheet {i}: name='{tab_text}', type='{sheet_type}', cells={len(sheet_data.get('cells', {}))}")
 
                 # Save user_added_rows if it exists
                 user_added_data = None
@@ -509,13 +601,19 @@ class ExcelLike(QMainWindow):
                 }
 
                 data["sheets"].append(sheet_info)
+                print(f"DEBUG SAVE: Successfully added sheet '{tab_text}' to save data")
             except Exception as e:
-                print(f"Error saving sheet {self.tabs.tabText(i)}: {e}")
+                print(f"ERROR SAVE: Error saving sheet {self.tabs.tabText(i)}: {e}")
+                import traceback
+                traceback.print_exc()
                 continue
 
+        print(f"DEBUG SAVE: Total sheets to save: {len(data['sheets'])}")
+        
         try:
             with open(path, "wb") as f:
                 pickle.dump(data, f)
+            print(f"DEBUG SAVE: Successfully saved to {path}")
         except Exception as e:
             raise Exception(f"Failed to write file: {str(e)}")
 
@@ -546,18 +644,53 @@ class ExcelLike(QMainWindow):
                 self.layout.removeItem(item)
 
         self.company_input.setText(data.get("company", ""))
-        self.period_input.setText(data.get("period", ""))
+        
+        # Load period dates with backward compatibility
+        if "period_from" in data and "period_to" in data:
+            # New format with date selectors
+            from_date = QDate.fromString(data.get("period_from", ""), "yyyy/MM/dd")
+            to_date = QDate.fromString(data.get("period_to", ""), "yyyy/MM/dd")
+            if from_date.isValid():
+                self.period_from_input.setDate(from_date)
+            if to_date.isValid():
+                self.period_to_input.setDate(to_date)
+        elif "period" in data:
+            # Old format - try to parse or use defaults
+            period_text = data.get("period", "")
+            # For now, just use defaults if old format
+            self.period_from_input.setDate(QDate.currentDate().addMonths(-1))
+            self.period_to_input.setDate(QDate.currentDate())
 
         # Load all sheets
         for sheet_info in data.get("sheets", []):
             try:
-                if sheet_info["type"] == "bank":
-                    table = self._create_bank_sheet(sheet_info["name"])
+                sheet_type = sheet_info.get("type", "regular")
+                sheet_name = sheet_info["name"]
+                
+                if sheet_type == "bank":
+                    table = self._create_bank_sheet(sheet_name)
                     # Set currency if available
                     if "currency" in sheet_info:
                         table.currency = sheet_info["currency"]
+                elif sheet_type == "aggregate":
+                    # Create the appropriate aggregate sheet
+                    if sheet_name == "銷售收入":
+                        table = self._create_sales_sheet()
+                    elif sheet_name == "銷售成本":
+                        table = self._create_cost_sheet()
+                    elif sheet_name == "銀行費用":
+                        table = self._create_bank_fee_sheet()
+                    elif sheet_name == "利息收入":
+                        table = self._create_interest_sheet()
+                    elif sheet_name == "應付費用":
+                        table = self._create_payable_sheet()
+                    elif sheet_name == "董事往來":
+                        table = self._create_director_sheet()
+                    else:
+                        # Fallback for other aggregate sheets like 工資, 商業登記證書, etc.
+                        table = self._create_regular_sheet(sheet_name)
                 else:
-                    table = self._create_regular_sheet(sheet_info["name"])
+                    table = self._create_regular_sheet(sheet_name)
 
                 table.load_data(sheet_info["data"])
 
@@ -577,8 +710,120 @@ class ExcelLike(QMainWindow):
         """Auto-save current state"""
         fname = self.company_input.text().strip() or "untitled"
         path = f"{fname}.exl"
+        print(f"DEBUG AUTO_SAVE: Starting auto-save, tabs count: {self.tabs.count()}")
         try:
             if self.tabs.count() > 0:
                 self._save_to_path(path)
+                print(f"DEBUG AUTO_SAVE: Auto-save completed successfully")
+            else:
+                print(f"DEBUG AUTO_SAVE: No tabs to save")
         except Exception as e:
-            print(f"Auto-save failed: {e}")
+            print(f"DEBUG AUTO_SAVE: Auto-save failed: {e}")
+            import traceback
+            traceback.print_exc()
+
+    def _auto_load_company_file(self):
+        """Try to automatically load the company file on startup"""
+        company_name = self.company_input.text().strip()
+        print(f"DEBUG: Auto-load starting, company_name: '{company_name}'")
+        
+        if company_name:
+            file_path = f"{company_name}.exl"
+            print(f"DEBUG: Looking for file: {file_path}")
+            
+            try:
+                import os
+                if os.path.exists(file_path):
+                    print(f"DEBUG: File exists, loading...")
+                    with open(file_path, "rb") as f:
+                        data = pickle.load(f)
+                    
+                    print(f"DEBUG: File loaded, found {len(data.get('sheets', []))} sheets")
+                    
+                    # Clear current sheets first
+                    self.tabs.clear()
+                    self.sheets = []
+                    
+                    # Clear exchange rate inputs
+                    for i in reversed(range(self.layout.count())):
+                        item = self.layout.itemAt(i)
+                        if item and hasattr(item.widget(), 'setPrefix'):
+                            item.widget().deleteLater()
+                            self.layout.removeItem(item)
+                    
+                    # Load the data - but keep default company name if file data is empty
+                    loaded_company = data.get("company", "").strip()
+                    if loaded_company:
+                        self.company_input.setText(loaded_company)
+                        print(f"DEBUG: Set company name to: '{loaded_company}'")
+                    # else keep the default "cmpName"
+                    
+                    # Load period dates with backward compatibility
+                    if "period_from" in data and "period_to" in data:
+                        # New format with date selectors
+                        from_date = QDate.fromString(data.get("period_from", ""), "yyyy/MM/dd")
+                        to_date = QDate.fromString(data.get("period_to", ""), "yyyy/MM/dd")
+                        if from_date.isValid():
+                            self.period_from_input.setDate(from_date)
+                        if to_date.isValid():
+                            self.period_to_input.setDate(to_date)
+                    elif "period" in data:
+                        # Old format - use defaults
+                        self.period_from_input.setDate(QDate.currentDate().addMonths(-1))
+                        self.period_to_input.setDate(QDate.currentDate())
+                    
+                    # Load all sheets
+                    for i, sheet_info in enumerate(data.get("sheets", [])):
+                        try:
+                            sheet_type = sheet_info.get("type", "regular")
+                            sheet_name = sheet_info["name"]
+                            print(f"DEBUG: Loading sheet {i}: name='{sheet_name}', type='{sheet_type}'")
+                            
+                            if sheet_type == "bank":
+                                table = self._create_bank_sheet(sheet_name)
+                                if "currency" in sheet_info:
+                                    table.currency = sheet_info["currency"]
+                            elif sheet_type == "aggregate":
+                                # Create the appropriate aggregate sheet
+                                if sheet_name == "銷售收入":
+                                    table = self._create_sales_sheet()
+                                elif sheet_name == "銷售成本":
+                                    table = self._create_cost_sheet()
+                                elif sheet_name == "銀行費用":
+                                    table = self._create_bank_fee_sheet()
+                                elif sheet_name == "利息收入":
+                                    table = self._create_interest_sheet()
+                                elif sheet_name == "應付費用":
+                                    table = self._create_payable_sheet()
+                                elif sheet_name == "董事往來":
+                                    table = self._create_director_sheet()
+                                else:
+                                    # Fallback for other aggregate sheets
+                                    print(f"DEBUG: Creating regular sheet for aggregate type: {sheet_name}")
+                                    table = self._create_regular_sheet(sheet_name)
+                            else:
+                                table = self._create_regular_sheet(sheet_name)
+                            
+                            table.load_data(sheet_info["data"])
+                            print(f"DEBUG: Successfully loaded sheet: {sheet_name}")
+                            
+                            # Restore user_added_rows if it exists
+                            if "user_added_rows" in sheet_info and sheet_info["user_added_rows"]:
+                                table.user_added_rows = set(sheet_info["user_added_rows"])
+                            
+                            if "exchange_rate" in sheet_info:
+                                table.set_exchange_rate(sheet_info["exchange_rate"])
+                                if hasattr(table, "exchange_rate_input"):
+                                    table.exchange_rate_input.setValue(sheet_info["exchange_rate"])
+                        except Exception as e:
+                            print(f"DEBUG: Error loading sheet {sheet_info.get('name', 'unknown')}: {e}")
+                            continue
+                    
+                    print(f"DEBUG: Auto-loaded company file: {file_path}, total tabs: {self.tabs.count()}")
+                else:
+                    print(f"DEBUG: Company file {file_path} not found, keeping default sheet")
+            except Exception as e:
+                print(f"DEBUG: Failed to auto-load company file: {e}")
+                # If loading fails, keep the default sheet that was already created
+        else:
+            print(f"DEBUG: No company name, keeping default sheet")

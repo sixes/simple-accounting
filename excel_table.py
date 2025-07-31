@@ -117,7 +117,13 @@ class ExcelTable(QTableWidget):
                 if not bal_item:
                     bal_item = QTableWidgetItem()
                     self.setItem(r, balance_col, bal_item)
-                bal_item.setText(f"{bal:.2f}")
+                # Format balance: no minus sign, comma separation for >1000
+                abs_bal = abs(bal)
+                if abs_bal >= 1000:
+                    bal_text = f"{abs_bal:,.2f}"
+                else:
+                    bal_text = f"{abs_bal:.2f}"
+                bal_item.setText(bal_text)
                 bal_item.setFlags(bal_item.flags() & ~Qt.ItemIsEditable)
             self.blockSignals(False)
         self._auto_save()
@@ -181,6 +187,8 @@ class ExcelTable(QTableWidget):
 
     def context_menu(self, pos):
         menu = QMenu(self)
+        
+        # Table operations
         add_row = QAction("Add Row", self)
         add_col = QAction("Add Column", self)
         del_row = QAction("Delete Row", self)
@@ -189,6 +197,7 @@ class ExcelTable(QTableWidget):
         paste = QAction("Paste", self)
         merge = QAction("Merge Cells", self)
         split = QAction("Unmerge Cells", self)
+        
         menu.addAction(add_row)
         menu.addAction(add_col)
         menu.addAction(del_row)
@@ -199,7 +208,23 @@ class ExcelTable(QTableWidget):
         menu.addSeparator()
         menu.addAction(merge)
         menu.addAction(split)
+        menu.addSeparator()
+        
+        # File operations
+        new_file = QAction("New", self)
+        add_sheet = QAction("Add Sheet", self)
+        delete_sheet = QAction("Delete Sheet", self)
+        save_file = QAction("Save", self)
+        load_file = QAction("Load", self)
+        
+        menu.addAction(new_file)
+        menu.addAction(add_sheet)
+        menu.addAction(delete_sheet)
+        menu.addSeparator()
+        menu.addAction(save_file)
+        menu.addAction(load_file)
 
+        # Connect table actions
         add_row.triggered.connect(lambda: self.insertRow(self.currentRow() + 1))
         add_col.triggered.connect(lambda: self.insertColumn(self.currentColumn() + 1))
         del_row.triggered.connect(lambda: self.removeRow(self.currentRow()))
@@ -208,6 +233,20 @@ class ExcelTable(QTableWidget):
         paste.triggered.connect(self.paste_cells)
         merge.triggered.connect(self.merge_cells)
         split.triggered.connect(self.unmerge_cells)
+        
+        # Connect file actions to parent window
+        parent_window = self.window()
+        if hasattr(parent_window, 'new_file'):
+            new_file.triggered.connect(parent_window.new_file)
+        if hasattr(parent_window, 'add_sheet_dialog'):
+            add_sheet.triggered.connect(parent_window.add_sheet_dialog)
+        if hasattr(parent_window, 'delete_sheet'):
+            delete_sheet.triggered.connect(parent_window.delete_sheet)
+        if hasattr(parent_window, 'save_file'):
+            save_file.triggered.connect(parent_window.save_file)
+        if hasattr(parent_window, 'load_file'):
+            load_file.triggered.connect(parent_window.load_file)
+        
         menu.exec(self.viewport().mapToGlobal(pos))
 
     def copy_cells(self):
@@ -255,7 +294,7 @@ class ExcelTable(QTableWidget):
         for row in range(self.rowCount()):
             for col in range(self.columnCount()):
                 item = self.item(row, col)
-                if item:
+                if item and item.text().strip():  # Only save non-empty cells
                     cells[(row, col)] = item.text()
         spans = []
         for row in range(self.rowCount()):
@@ -263,6 +302,7 @@ class ExcelTable(QTableWidget):
                 rs, cs = self.rowSpan(row, col), self.columnSpan(row, col)
                 if rs > 1 or cs > 1:
                     spans.append((row, col, rs, cs))
+        # Always return data structure even if empty
         return {"cells": cells, "spans": spans, "rows": self.rowCount(), "cols": self.columnCount()}
 
     def load_data(self, data):
