@@ -3,6 +3,7 @@ from PySide6.QtWidgets import (
     QTableWidget, QTableWidgetItem, QMenu, QApplication
 )
 from PySide6.QtGui import QColor  # Add this import
+from PySide6.QtGui import QPainter  # Add this with other imports
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QAction, QKeySequence
 
@@ -32,34 +33,99 @@ class ExcelTable(QTableWidget):
         self.itemChanged.connect(self._on_item_changed)
         self.cellChanged.connect(self._on_cell_changed)
         self.user_added_rows = set()  # Track user-added rows
-        self.setStyleSheet("""
-            QTableWidget {
-                background: #ffffff;
-                gridline-color: #e0e0e0;
-                selection-background-color: #cce2ff;
-                selection-color: #000;
-                font-size: 14px;
-            }
-            QHeaderView::section {
-                background: #e9ecef;
-                color: #222;
-                border: 1px solid #e0e0e0;
-                font-weight: bold;
-                font-size: 15px;
-                padding: 4px;
-            }
-            QTableWidget::item {
-                border: 0.5px solid #e0e0e0;
-                font-size: 14px;
-                background: #ffffff;
-                color: #000;
-            }
-            QTableWidget::item:selected {
-                border: 1.5px solid #0078d4;
-                background: #cce2ff;
-                color: #000;
-            }
-        """)
+        self._last_paint_pos = -1
+        self._pinned_row1 = rows
+        self._pinned_row2 = rows + 1
+        # Enable smooth scrolling and proper updates
+        self.setVerticalScrollMode(QTableWidget.ScrollPerPixel)
+        self.viewport().setAttribute(Qt.WA_OpaquePaintEvent, False)
+        if False:
+            self.setStyleSheet("""
+                QTableWidget {
+                    background: #ffffff;
+                    gridline-color: #e0e0e0;
+                    selection-background-color: #cce2ff;
+                    selection-color: #000;
+                    font-size: 14px;
+                }
+                QHeaderView::section {
+                    background: #e9ecef;
+                    color: #222;
+                    border: 1px solid #e0e0e0;
+                    font-weight: bold;
+                    font-size: 15px;
+                    padding: 4px;
+                }
+                QTableWidget::item {
+                    border: 0.5px solid #e0e0e0;
+                    font-size: 14px;
+                    background: #ffffff;
+                    color: #000;
+                }
+                QTableWidget::item:selected {
+                    border: 1.5px solid #0078d4;
+                    background: #cce2ff;
+                    color: #000;
+                }
+            """)
+
+    def paintEvent(self, event):
+        # First draw the normal table contents
+        super().paintEvent(event)
+
+        # Only proceed if we're showing pinned rows
+        if hasattr(self, "exchange_rate") or True:
+            from PySide6.QtGui import QPainter
+            painter = QPainter(self.viewport())
+            try:
+                # Get visible area dimensions
+                viewport = self.viewport()
+                visible_rect = viewport.rect()
+                row_height = self.rowHeight(0)
+
+                # Calculate positions - fixed at bottom of visible area
+                y1 = visible_rect.height() - 2 * row_height
+                y2 = visible_rect.height() - row_height
+
+                # IMPORTANT: Enable composition mode to properly clear previous paints
+                painter.setCompositionMode(QPainter.CompositionMode_Source)
+
+                # Clear exactly the area where pinned rows will appear
+                painter.fillRect(0, y1, visible_rect.width(), 2 * row_height,
+                            self.palette().window().color())
+
+                # Restore normal composition mode
+                painter.setCompositionMode(QPainter.CompositionMode_SourceOver)
+
+                # Calculate current sums
+                debit_sum, credit_sum = self.sum_columns()
+                balance = debit_sum - credit_sum
+
+                def format_number(value):
+                    abs_value = abs(value)
+                    formatted = f"{abs_value:,.2f}" if abs_value >= 1000 else f"{abs_value:.2f}"
+                    return f"({formatted})" if value < 0 else formatted
+
+                balance_str = format_number(balance)
+                # Draw first pinned row (sheet currency)
+                painter.fillRect(0, y1, visible_rect.width(), row_height, QColor(240, 240, 240))
+                painter.drawText(10, y1 + row_height//2 + 5,
+                            f"合計({self.currency}): 借方={abs(debit_sum):,.2f} 貸方={abs(credit_sum):,.2f} 餘額={balance_str}")
+
+                # Draw second pinned row (HKD)
+                rate = getattr(self, "exchange_rate", 1.0)
+                hkd_balance = balance * rate
+                hkd_balance_str = format_number(hkd_balance)
+                painter.fillRect(0, y2, visible_rect.width(), row_height, QColor(220, 220, 220))
+                painter.drawText(10, y2 + row_height//2 + 5,
+                            f"合計(HKD): 借方={debit_sum*rate:,.2f} 貸方={credit_sum*rate:,.2f} 餘額={hkd_balance_str}")
+
+                # Force immediate update to prevent artifacts
+                self.viewport().update()
+            finally:
+                painter.end()
+
+
     def _on_cell_changed(self, row, column):
         """Track user edits by adding row to user_added_rows"""
         if row not in self.user_added_rows:
@@ -187,7 +253,7 @@ class ExcelTable(QTableWidget):
 
     def context_menu(self, pos):
         menu = QMenu(self)
-        
+
         # Table operations
         add_row = QAction("Add Row", self)
         add_col = QAction("Add Column", self)
@@ -197,7 +263,7 @@ class ExcelTable(QTableWidget):
         paste = QAction("Paste", self)
         merge = QAction("Merge Cells", self)
         split = QAction("Unmerge Cells", self)
-        
+
         menu.addAction(add_row)
         menu.addAction(add_col)
         menu.addAction(del_row)
@@ -209,16 +275,18 @@ class ExcelTable(QTableWidget):
         menu.addAction(merge)
         menu.addAction(split)
         menu.addSeparator()
-        
+
         # File operations
         new_file = QAction("New", self)
         add_sheet = QAction("Add Sheet", self)
+        rename_sheet = QAction("Rename Sheet", self)  # ADDED THIS LINE
         delete_sheet = QAction("Delete Sheet", self)
         save_file = QAction("Save", self)
         load_file = QAction("Load", self)
-        
+
         menu.addAction(new_file)
         menu.addAction(add_sheet)
+        menu.addAction(rename_sheet)  # ADDED THIS LINE
         menu.addAction(delete_sheet)
         menu.addSeparator()
         menu.addAction(save_file)
@@ -233,7 +301,8 @@ class ExcelTable(QTableWidget):
         paste.triggered.connect(self.paste_cells)
         merge.triggered.connect(self.merge_cells)
         split.triggered.connect(self.unmerge_cells)
-        
+        rename_sheet.triggered.connect(self.rename_sheet)
+
         # Connect file actions to parent window
         parent_window = self.window()
         if hasattr(parent_window, 'new_file'):
@@ -246,8 +315,33 @@ class ExcelTable(QTableWidget):
             save_file.triggered.connect(parent_window.save_file)
         if hasattr(parent_window, 'load_file'):
             load_file.triggered.connect(parent_window.load_file)
-        
+
         menu.exec(self.viewport().mapToGlobal(pos))
+
+    def rename_sheet(self):
+        """Rename the current sheet"""
+        from PySide6.QtWidgets import QInputDialog
+        new_name, ok = QInputDialog.getText(
+            self,
+            "Rename Sheet",
+            "Enter new sheet name:",
+            text=self.name
+        )
+        if ok and new_name and new_name != self.name:
+            old_name = self.name
+            self.name = new_name
+            if "-" in new_name:
+                self.currency = new_name.split("-")[1]
+            else:
+                self.currency = ""
+
+            # Update tab name if parent has update_tab_name method
+            if hasattr(self.window(), 'update_tab_name'):
+                self.window().update_tab_name(old_name, new_name)
+
+            # Force save and refresh
+            self._auto_save()
+            self.viewport().update()
 
     def copy_cells(self):
         sel = self.selectedRanges()
@@ -303,24 +397,55 @@ class ExcelTable(QTableWidget):
                 if rs > 1 or cs > 1:
                     spans.append((row, col, rs, cs))
         # Always return data structure even if empty
-        return {"cells": cells, "spans": spans, "rows": self.rowCount(), "cols": self.columnCount()}
+        return {"cells": cells, "spans": spans, "rows": self.rowCount(), "cols": self.columnCount(), "name": self.name}
 
     def load_data(self, data):
-        self.setRowCount(data["rows"])
-        self.setColumnCount(data["cols"])
-        # Restore custom headers if they exist
-        if "headers" in data and data["headers"]:
-            self._custom_headers = data["headers"]
-            self.setHorizontalHeaderLabels(self._custom_headers)
-        else:
-            self.update_headers()
-        for (row, col), text in data["cells"].items():
-            self.setItem(row, col, QTableWidgetItem(text))
-        for row, col, rs, cs in data["spans"]:
-            self.setSpan(row, col, rs, cs)
+        """Load data into the table with error handling"""
+        try:
+            # Set row and column counts only if they exist
+            if "rows" in data:
+                self.setRowCount(data["rows"])
+            if "cols" in data:
+                self.setColumnCount(data["cols"])
+
+            if "name" in data:
+                self.name = data["name"]
+                if "-" in self.name:
+                    self.currency = self.name.split("-")[1]
+                else:
+                    self.currency = ""
+
+            # Restore custom headers if they exist
+            if "headers" in data and data["headers"]:
+                self._custom_headers = data["headers"]
+                self.setHorizontalHeaderLabels(self._custom_headers)
+            else:
+                self.update_headers()
+
+            # Load cell data if it exists
+            if "cells" in data:
+                for (row, col), text in data["cells"].items():
+                    self.setItem(row, col, QTableWidgetItem(text))
+
+            # Load cell spans if they exist
+            if "spans" in data:
+                for row, col, rs, cs in data["spans"]:
+                    self.setSpan(row, col, rs, cs)
+
+        except Exception as e:
+            print(f"ERROR LOAD DATA: Failed to load data: {e}")
+            import traceback
+            traceback.print_exc()
 
     def keyPressEvent(self, event):
         # Handle Ctrl+V for paste
+        if event.key() == Qt.Key_Delete:
+            for item in self.selectedItems():
+                if item.flags() & Qt.ItemIsEditable:  # Check if cell is editable
+                    item.setText("")
+            if self.auto_save_callback:
+                self.auto_save_callback()
+            return
         if event.matches(QKeySequence.Paste):
             self.paste_cells()
             return
@@ -362,41 +487,6 @@ class ExcelTable(QTableWidget):
                     pass
 
         return debit_sum, credit_sum
-
-    def paintEvent(self, event):
-        super().paintEvent(event)
-        # Draw pinned rows at the bottom
-        if hasattr(self, "exchange_rate") or True:
-            from PySide6.QtGui import QPainter
-            painter = QPainter(self.viewport())
-            try:
-                rect = self.viewport().rect()
-                row_height = self.rowHeight(0)
-                debit_sum, credit_sum = self.sum_columns()
-                balance = debit_sum - credit_sum
-
-                # Format numbers
-                debit_str = "{:,.2f}".format(abs(debit_sum))
-                credit_str = "{:,.2f}".format(abs(credit_sum))
-                balance_str = "({:,.2f})".format(abs(balance)) if balance < 0 else "{:,.2f}".format(balance)
-
-                # Row 1: sum in sheet currency
-                y1 = rect.bottom() - 2 * row_height
-                painter.fillRect(0, y1, rect.width(), row_height, QColor(240, 240, 240))
-                painter.drawText(10, y1 + row_height // 2 + 5,
-                            f"合計({getattr(self, 'currency', '')}): 借方={debit_str}  貸方={credit_str}  餘額={balance_str}")
-
-                # Row 2: sum in HKD
-                y2 = rect.bottom() - row_height
-                painter.fillRect(0, y2, rect.width(), row_height, QColor(220, 220, 220))
-                rate = getattr(self, "exchange_rate", 1.0)
-                hkd_balance = balance * rate
-                hkd_balance_str = "({:,.2f})".format(abs(hkd_balance)) if hkd_balance < 0 else "{:,.2f}".format(hkd_balance)
-                painter.drawText(10, y2 + row_height // 2 + 5,
-                            f"合計(HKD): 借方={debit_sum*rate:,.2f}  貸方={credit_sum*rate:,.2f}  餘額={hkd_balance_str}")
-            finally:
-                painter.end()
-
 
     def _auto_save(self, *_):
         if self.auto_save_callback:
