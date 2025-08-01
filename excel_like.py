@@ -1,6 +1,6 @@
 from PySide6.QtWidgets import (
     QMainWindow, QTabWidget, QLineEdit, QLabel, QHBoxLayout, QVBoxLayout,
-    QWidget, QInputDialog, QDateEdit, QDialog, QMenu
+    QWidget, QInputDialog, QDateEdit, QDialog, QMenu, QMessageBox
 )
 from PySide6.QtGui import QAction
 from PySide6.QtCore import Qt, QDate
@@ -36,7 +36,7 @@ class ExcelLike(QMainWindow):
         self.user_added_rows = None
 
         # Connect signals for auto-save
-        self.company_input.textChanged.connect(self.auto_save)
+        self.company_input.editingFinished.connect(self.auto_save)
         self.period_from_input.dateChanged.connect(self.auto_save)
         self.period_to_input.dateChanged.connect(self.auto_save)
 
@@ -213,16 +213,32 @@ class ExcelLike(QMainWindow):
         """Delete the current sheet"""
         idx = self.tabs.currentIndex()
         if self.tabs.count() > 1:
-            self.tabs.removeTab(idx)
-            del self.sheets[idx]
-            self.auto_save()
+            sheet_name = self.tabs.tabText(idx)
+            reply = QMessageBox.question(
+                self,
+                "Delete Sheet",
+                f"Are you sure you want to delete the sheet '{sheet_name}'?",
+                QMessageBox.Yes | QMessageBox.No
+            )
+            if reply == QMessageBox.Yes:
+                self.tabs.removeTab(idx)
+                del self.sheets[idx]
+                self.auto_save()
 
     def close_tab(self, idx):
         """Close tab at given index"""
         if self.tabs.count() > 1:
-            self.tabs.removeTab(idx)
-            del self.sheets[idx]
-            self.auto_save()
+            sheet_name = self.tabs.tabText(idx)
+            reply = QMessageBox.question(
+                self,
+                "Close Sheet",
+                f"Are you sure you want to close the sheet '{sheet_name}'?",
+                QMessageBox.Yes | QMessageBox.No
+            )
+            if reply == QMessageBox.Yes:
+                self.tabs.removeTab(idx)
+                del self.sheets[idx]
+                self.auto_save()
 
     def new_file(self):
         """Create a new file with default sheet"""

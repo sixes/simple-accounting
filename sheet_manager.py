@@ -3,6 +3,9 @@ from PySide6.QtCore import Qt, QDate
 from PySide6.QtGui import QColor
 from excel_table import ExcelTable
 from datetime import datetime
+import logging
+
+logger = logging.getLogger(__name__)
 
 class SheetManager:
     def __init__(self, main_window):
@@ -17,24 +20,24 @@ class SheetManager:
 
         # Set the load/save callbacks that ExcelTable's context menu should use
         def debug_load_wrapper():
-            print("DEBUG WRAPPER: load_callback called!")
+            logger.info("DEBUG WRAPPER: load_callback called!")
             return self.main_window.file_manager.load_file()
             
         def debug_save_wrapper():
-            print("DEBUG WRAPPER: save_callback called!")
+            logger.info("DEBUG WRAPPER: save_callback called!")
             return self.main_window.file_manager.save_file()
             
         table.load_callback = debug_load_wrapper
         table.save_callback = debug_save_wrapper
-        print(f"DEBUG: Set callbacks on table {name}")
+        logger.info(f"DEBUG: Set callbacks on table {name}")
         
         # Try to find and override ExcelTable's actual context menu actions
-        print(f"DEBUG: Table attributes: {[attr for attr in dir(table) if 'load' in attr.lower() or 'save' in attr.lower() or 'action' in attr.lower()]}")
+        logger.info(f"DEBUG: Table attributes: {[attr for attr in dir(table) if 'load' in attr.lower() or 'save' in attr.lower() or 'action' in attr.lower()]}")
         
         # Override the contextMenuEvent method to intercept context menu
         original_context_menu = table.contextMenuEvent
         def custom_context_menu(event):
-            print("DEBUG: Custom context menu called!")
+            logger.info("DEBUG: Custom context menu called!")
             # Call original to get the menu
             original_context_menu(event)
             
@@ -58,7 +61,7 @@ class SheetManager:
 
     def create_regular_sheet(self, name):
         """Create a regular sheet"""
-        print(f"DEBUG CREATE: Creating regular sheet '{name}'")
+        logger.info(f"DEBUG CREATE: Creating regular sheet '{name}'")
         columns = ["序 號", "日  期", "對方科目", "摘   要", "借     方", "貸     方", "借或貸", "餘    額", "發票號碼"]
         table = ExcelTable(auto_save_callback=self.main_window.auto_save, name=name)
         table.setColumnCount(len(columns))
@@ -70,7 +73,7 @@ class SheetManager:
         
         self.main_window.tabs.addTab(table, name)
         self.main_window.sheets.append(table)
-        print(f"DEBUG CREATE: Regular sheet '{name}' created, total sheets: {len(self.main_window.sheets)}, total tabs: {self.main_window.tabs.count()}")
+        logger.info(f"DEBUG CREATE: Regular sheet '{name}' created, total sheets: {len(self.main_window.sheets)}, total tabs: {self.main_window.tabs.count()}")
         return table
 
     def create_aggregate_sheet(self, sheet_name, subject_filter, column_title):
@@ -167,7 +170,7 @@ class SheetManager:
 
         # Sort by date
         data_rows.sort(key=lambda x: x['date_obj'])
-
+        logger.info(f"data_rows: {data_rows}")
         bank_data_color = QColor(200, 255, 200)  # Light green for bank data
         # Add to table
         for i, row_data in enumerate(data_rows):
@@ -222,10 +225,10 @@ class SheetManager:
             amount_col_index = 5  # Column index for amount (debit/credit)
 
             # Collect all matching rows from bank sheets
-            print(f"sheets: {self.main_window.sheets}")
+            logger.info(f"sheets: {self.main_window.sheets}")
             for sheet in self.main_window.sheets:
                 if "-" in sheet.name:  # Bank sheet
-                    print(f"looking at sheet: {sheet.name} subject_filter: {subject_filter} column_title: {column_title}")
+                    logger.info(f"looking at sheet: {sheet.name} subject_filter: {subject_filter} column_title: {column_title}")
                     for row in range(sheet.rowCount() - 2):  # Exclude pinned rows
                         subject_item = sheet.item(row, 2)  # 對方科目 column
                         if subject_item and subject_filter in subject_item.text():
@@ -254,7 +257,7 @@ class SheetManager:
 
             # Sort by date
             data_rows.sort(key=lambda x: x['date_obj'])
-            print(f"data_rows: {data_rows}")
+            logger.info(f"data_rows: {data_rows}")
             bank_data_color = QColor(200, 255, 200)  # Light green for bank data
             for i, row_data in enumerate(data_rows):
                 for col, value in [

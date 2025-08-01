@@ -1,6 +1,14 @@
 import sys
+import logging
 from PySide6.QtWidgets import QApplication
 from excel_like import ExcelLike
+
+# Setup logging to file
+logging.basicConfig(
+    filename='banknote.log',
+    level=logging.DEBUG,
+    format='%(asctime)s %(levelname)s %(message)s'
+)
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)

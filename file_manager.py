@@ -1,7 +1,10 @@
 import pickle
 import os
+import logging
 from PySide6.QtWidgets import QFileDialog, QMessageBox
 from PySide6.QtCore import QDate
+
+logger = logging.getLogger(__name__)
 
 class FileManager:
     def __init__(self, main_window):
@@ -9,7 +12,7 @@ class FileManager:
 
     def save_file(self):
         """Save current file"""
-        print("DEBUG FILE_MANAGER: save_file() called from context menu!")
+        logger.info("save_file() called from context menu!")
         fname = self.main_window.company_input.text().strip() or "untitled"
         path, _ = QFileDialog.getSaveFileName(
             self.main_window, "Save File", f"{fname}.exl", "ExcelLike (*.exl)"
@@ -18,12 +21,12 @@ class FileManager:
             try:
                 self.save_to_path(path)
                 # Update company name input to saved file name (without extension)
-                import os
                 base = os.path.basename(path)
                 name = os.path.splitext(base)[0]
                 self.main_window.company_input.setText(name)
-                print(f"DEBUG SAVE: Updated company name to '{name}' after saving")
+                logger.info(f"Updated company name to '{name}' after saving")
             except Exception as e:
+                logger.error(f"Failed to save file: {str(e)}")
                 QMessageBox.warning(self.main_window, "Save Error", f"Failed to save file: {str(e)}")
 
     def save_to_path(self, path):
@@ -73,9 +76,9 @@ class FileManager:
                 }
 
                 data["sheets"].append(sheet_info)
-                print(f"DEBUG SAVE: Successfully added sheet '{tab_text}' to save data")
+                logger.info(f"Successfully added sheet '{tab_text}' to save data")
             except Exception as e:
-                print(f"ERROR SAVE: Error saving sheet {self.main_window.tabs.tabText(i)}: {e}")
+                logger.error(f"Error saving sheet {self.main_window.tabs.tabText(i)}: {e}")
                 import traceback
                 traceback.print_exc()
                 continue
@@ -83,32 +86,33 @@ class FileManager:
         try:
             with open(path, "wb") as f:
                 pickle.dump(data, f)
-            print(f"DEBUG SAVE: Successfully saved to {path}")
+            logger.info(f"Successfully saved to {path}")
         except Exception as e:
+            logger.error(f"Failed to write file: {str(e)}")
             raise Exception(f"Failed to write file: {str(e)}")
 
     def load_file(self):
         """Load file from disk"""
-        print("DEBUG FILE_MANAGER: load_file() called from context menu!")
+        logger.info("load_file() called from context menu!")
         path, _ = QFileDialog.getOpenFileName(
             self.main_window, "Open File", "", "ExcelLike (*.exl)"
         )
         if not path:
-            print("DEBUG FILE_MANAGER: No file selected")
+            logger.info("No file selected")
             return
 
-        print(f"DEBUG FILE_MANAGER: Attempting to load file {path}")
+        logger.info(f"Attempting to load file {path}")
         try:
             with open(path, "rb") as f:
                 data = pickle.load(f)
             self.load_data_from_dict(data)
         except Exception as e:
-            print(f"ERROR LOAD: Failed to load file: {str(e)}")
+            logger.error(f"Failed to load file: {str(e)}")
             QMessageBox.warning(self.main_window, "Load Error", f"Failed to load file: {str(e)}")
 
     def load_data_from_dict(self, data):
         """Common method to load data from a dictionary (used by both auto-load and manual load)"""
-        print(f"DEBUG LOAD: Starting data load, found {len(data.get('sheets', []))} sheets")
+        logger.info(f"Starting data load, found {len(data.get('sheets', []))} sheets")
         self.main_window.tabs.clear()
         self.main_window.user_added_rows = None
         self.main_window.sheets = []
@@ -126,7 +130,7 @@ class FileManager:
         # Set company name if it exists in data
         company_name = data.get("company", "").strip()
         self.main_window.company_input.setText(company_name)
-        print(f"DEBUG LOAD: Set company name to: '{company_name}'")
+        logger.info(f"Set company name to: '{company_name}'")
 
         # Load period dates with backward compatibility
         if "period_from" in data and "period_to" in data:
@@ -136,14 +140,14 @@ class FileManager:
                 self.main_window.period_from_input.setDate(from_date)
             if to_date.isValid():
                 self.main_window.period_to_input.setDate(to_date)
-            print(f"DEBUG LOAD: Set period to {from_date.toString()} - {to_date.toString()}")
+            logger.info(f"Set period to {from_date.toString()} - {to_date.toString()}")
 
         # First pass: create all sheets and store them in temp_sheets
         for sheet_info in data.get("sheets", []):
             try:
                 sheet_type = sheet_info.get("type", "regular")
                 sheet_name = sheet_info["name"]
-                print(f"DEBUG LOAD: Creating sheet: name='{sheet_name}', type='{sheet_type}'")
+                logger.info(f"Creating sheet: name='{sheet_name}', type='{sheet_type}'")
 
                 if sheet_type == "bank":
                     table = self.main_window.sheet_manager.create_bank_sheet(sheet_name)
@@ -169,21 +173,21 @@ class FileManager:
                 temp_sheets[sheet_name] = table
 
             except Exception as e:
-                print(f"ERROR LOAD: Error creating sheet {sheet_info.get('name', 'unknown')}: {e}")
+                logger.error(f"Error creating sheet {sheet_info.get('name', 'unknown')}: {e}")
                 import traceback
                 traceback.print_exc()
                 raise e
 
         # Second pass: load data and add sheets in correct order
         tab_order = data.get("tab_order", [sheet["name"] for sheet in data.get("sheets", [])])
-        print(f"tab_order: {tab_order}")
+        logger.info(f"tab_order: {tab_order}")
         for sheet_name in tab_order:
             if sheet_name in temp_sheets:
                 sheet_info = next((s for s in data["sheets"] if s["name"] == sheet_name), None)
                 if sheet_info:
                     table = temp_sheets[sheet_name]
                     try:
-                        print(f"DEBUG LOAD: Loading data for sheet '{sheet_name}'")
+                        logger.info(f"Loading data for sheet '{sheet_name}'")
                         table.load_data(sheet_info["data"])
 
                         if "user_added_rows" in sheet_info and sheet_info["user_added_rows"]:
@@ -198,17 +202,17 @@ class FileManager:
                             table.currency = sheet_info["currency"]
 
                         self.main_window.tabs.addTab(table, sheet_name)
-                        print(f"loading {sheet_info}")
+                        logger.info(f"loading {sheet_info}")
 
                     except Exception as e:
-                        print(f"ERROR LOAD: Error loading data for sheet {sheet_name}: {e}")
+                        logger.error(f"Error loading data for sheet {sheet_name}: {e}")
                         import traceback
                         traceback.print_exc()
                         raise e
 
-        print("DEBUG LOAD: Data loading completed successfully")
+        logger.info("Data loading completed successfully")
         self.last_loaded_company_name = data.get("company", "")
-        print(f"DEBUG LOAD: last_loaded_company_name set to '{self.last_loaded_company_name}'")
+        logger.info(f"last_loaded_company_name set to '{self.last_loaded_company_name}'")
 
     def auto_save(self):
         """Auto-save current state"""
@@ -218,32 +222,32 @@ class FileManager:
             if self.main_window.tabs.count() > 0:
                 self.save_to_path(path)
             else:
-                print(f"DEBUG AUTO_SAVE: No tabs to save")
+                logger.info("No tabs to save")
         except Exception as e:
-            print(f"DEBUG AUTO_SAVE: Auto-save failed: {e}")
+            logger.error(f"Auto-save failed: {e}")
             import traceback
             traceback.print_exc()
 
     def auto_load_company_file(self):
         """Try to automatically load the company file on startup"""
         company_name = self.main_window.company_input.text().strip()
-        print(f"DEBUG AUTO_LOAD: Starting auto-load, company_name: '{company_name}'")
+        logger.info(f"Starting auto-load, company_name: '{company_name}'")
 
         if company_name:
             file_path = f"{company_name}.exl"
-            print(f"DEBUG AUTO_LOAD: Looking for file: {file_path}")
+            logger.info(f"Looking for file: {file_path}")
 
             try:
                 if os.path.exists(file_path):
-                    print(f"DEBUG AUTO_LOAD: File exists, loading...")
+                    logger.info(f"File exists, loading...")
                     with open(file_path, "rb") as f:
                         data = pickle.load(f)
                     self.load_data_from_dict(data)
-                    print(f"DEBUG AUTO_LOAD: Auto-loaded company file: {file_path}")
+                    logger.info(f"Auto-loaded company file: {file_path}")
                 else:
                     self.main_window.new_file()
             except Exception as e:
-                print(f"ERROR AUTO_LOAD: Failed to auto-load company file: {e}")
+                logger.error(f"Failed to auto-load company file: {e}")
                 # If loading fails, keep the default sheet that was already created
         else:
-            print(f"DEBUG AUTO_LOAD: No company name, keeping default sheet")
+            logger.info("No company name, keeping default sheet")

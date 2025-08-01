@@ -1,4 +1,5 @@
 import pickle
+import logging
 from PySide6.QtWidgets import (
     QTableWidget, QTableWidgetItem, QMenu, QApplication
 )
@@ -6,6 +7,8 @@ from PySide6.QtGui import QColor  # Add this import
 from PySide6.QtGui import QPainter  # Add this with other imports
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QAction, QKeySequence
+
+logger = logging.getLogger(__name__)
 
 
 def excel_column_name(n):
@@ -433,7 +436,7 @@ class ExcelTable(QTableWidget):
                     self.setSpan(row, col, rs, cs)
 
         except Exception as e:
-            print(f"ERROR LOAD DATA: Failed to load data: {e}")
+            logger.error(f"ERROR LOAD DATA: Failed to load data: {e}")
             import traceback
             traceback.print_exc()
 
