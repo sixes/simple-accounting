@@ -11,8 +11,9 @@ class SheetManager:
     def __init__(self, main_window):
         self.main_window = main_window
 
-    def create_bank_sheet(self, name):
+    def create_bank_sheet(self, name, currency=None):
         """Create a bank sheet with exchange rate control"""
+        # name is always '{company}-{currency}'
         columns = ["序 號", "日  期", "對方科目", "摘   要", "借     方", "貸     方", "餘    額", "發票號碼"]
         table = ExcelTable(auto_save_callback=self.main_window.auto_save, name=name)
         table.setColumnCount(len(columns))
@@ -45,8 +46,9 @@ class SheetManager:
 
         # Add exchange rate control
         rate_input = QDoubleSpinBox()
-        currency = name.split("-")[1] if "-" in name else ""
-        rate_input.setPrefix(f"{currency}:HKD = 1:")
+        # Use currency argument if provided, else try to parse from name
+        currency_str = currency if currency else (name.split("-")[1] if "-" in name else "")
+        rate_input.setPrefix(f"{currency_str}:HKD = 1:")
         rate_input.setValue(1.0)
         rate_input.setDecimals(2)
         rate_input.valueChanged.connect(lambda v, t=table: t.set_exchange_rate(v))
@@ -54,7 +56,9 @@ class SheetManager:
         self.main_window.layout.addWidget(rate_input)
         table.exchange_rate_input = rate_input
         table.set_exchange_rate(1.0)
-
+        if currency:
+            table.currency = currency
+        table.name = name  # always set to '{company}-{currency}'
         self.main_window.tabs.addTab(table, name)
         self.main_window.sheets.append(table)
         return table
@@ -89,6 +93,7 @@ class SheetManager:
 
         # Add pinned rows for totals
         table.setRowCount(100 + 2)  # Regular rows + 2 pinned rows
+        # Only director sheet allows user-added rows
         if sheet_name == "董事往來":
             table.user_added_rows = set()
 
@@ -120,6 +125,10 @@ class SheetManager:
     def create_interest_sheet(self):
         """Create an interest income sheet"""
         return self.create_aggregate_sheet("利息收入", "利息收入", "貸     方")
+
+    def create_salary_sheet(self):
+        """Create a salary sheet"""
+        return self.create_aggregate_sheet("工資", "工資", "借     方")
 
     def populate_aggregate_data(self, table, subject_filter, amount_column_title):
         user_data = []

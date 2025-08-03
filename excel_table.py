@@ -3,8 +3,7 @@ import logging
 from PySide6.QtWidgets import (
     QTableWidget, QTableWidgetItem, QMenu, QApplication
 )
-from PySide6.QtGui import QColor  # Add this import
-from PySide6.QtGui import QPainter  # Add this with other imports
+from PySide6.QtGui import QColor
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QAction, QKeySequence
 
@@ -37,8 +36,6 @@ class ExcelTable(QTableWidget):
         self.cellChanged.connect(self._on_cell_changed)
         self.user_added_rows = set()  # Track user-added rows
         self._last_paint_pos = -1
-        self._pinned_row1 = rows
-        self._pinned_row2 = rows + 1
         # Enable smooth scrolling and proper updates
         self.setVerticalScrollMode(QTableWidget.ScrollPerPixel)
         self.viewport().setAttribute(Qt.WA_OpaquePaintEvent, False)
@@ -73,61 +70,75 @@ class ExcelTable(QTableWidget):
             """)
 
     def paintEvent(self, event):
-        # First draw the normal table contents
         super().paintEvent(event)
-
-        # Only proceed if we're showing pinned rows
-        if hasattr(self, "exchange_rate") or True:
-            from PySide6.QtGui import QPainter
-            painter = QPainter(self.viewport())
-            try:
-                # Get visible area dimensions
-                viewport = self.viewport()
-                visible_rect = viewport.rect()
-                row_height = self.rowHeight(0)
-
-                # Calculate positions - fixed at bottom of visible area
-                y1 = visible_rect.height() - 2 * row_height
-                y2 = visible_rect.height() - row_height
-
-                # IMPORTANT: Enable composition mode to properly clear previous paints
-                painter.setCompositionMode(QPainter.CompositionMode_Source)
-
-                # Clear exactly the area where pinned rows will appear
-                painter.fillRect(0, y1, visible_rect.width(), 2 * row_height,
-                            self.palette().window().color())
-
-                # Restore normal composition mode
-                painter.setCompositionMode(QPainter.CompositionMode_SourceOver)
-
-                # Calculate current sums
-                debit_sum, credit_sum = self.sum_columns()
-                balance = debit_sum - credit_sum
-
-                def format_number(value):
-                    abs_value = abs(value)
-                    formatted = f"{abs_value:,.2f}" if abs_value >= 1000 else f"{abs_value:.2f}"
-                    return f"({formatted})" if value < 0 else formatted
-
-                balance_str = format_number(balance)
-                # Draw first pinned row (sheet currency)
-                painter.fillRect(0, y1, visible_rect.width(), row_height, QColor(240, 240, 240))
-                painter.drawText(10, y1 + row_height//2 + 5,
-                            f"合計({self.currency}): 借方={abs(debit_sum):,.2f} 貸方={abs(credit_sum):,.2f} 餘額={balance_str}")
-
-                # Draw second pinned row (HKD)
-                rate = getattr(self, "exchange_rate", 1.0)
-                hkd_balance = balance * rate
-                hkd_balance_str = format_number(hkd_balance)
-                painter.fillRect(0, y2, visible_rect.width(), row_height, QColor(220, 220, 220))
-                painter.drawText(10, y2 + row_height//2 + 5,
-                            f"合計(HKD): 借方={debit_sum*rate:,.2f} 貸方={credit_sum*rate:,.2f} 餘額={hkd_balance_str}")
-
-                # Force immediate update to prevent artifacts
-                self.viewport().update()
-            finally:
-                painter.end()
-
+        from PySide6.QtGui import QPainter, QFont
+        painter = QPainter(self.viewport())
+        try:
+            viewport = self.viewport()
+            visible_rect = viewport.rect()
+            row_height = self.rowHeight(0)
+            col_count = self.columnCount()
+            col_widths = [self.columnWidth(col) for col in range(col_count)]
+            x_positions = [self.columnViewportPosition(col) for col in range(col_count)]
+            y1 = visible_rect.height() - 2 * row_height
+            y2 = visible_rect.height() - row_height
+            painter.setCompositionMode(QPainter.CompositionMode_Source)
+            painter.fillRect(0, y1, visible_rect.width(), 2 * row_height, self.palette().window().color())
+            painter.setCompositionMode(QPainter.CompositionMode_SourceOver)
+            debit_sum, credit_sum = self.sum_columns()
+            balance = debit_sum - credit_sum
+            rate = getattr(self, "exchange_rate", 1.0)
+            hkd_balance = balance * rate
+            def format_number(value):
+                abs_value = abs(value)
+                formatted = f"{abs_value:,.2f}" if abs_value >= 1000 else f"{abs_value:.2f}"
+                return f"({formatted})" if value < 0 else formatted
+            balance_str = format_number(balance)
+            hkd_balance_str = format_number(hkd_balance)
+            debit_col = None
+            credit_col = None
+            balance_col = None
+            for col in range(col_count):
+                header = self.horizontalHeaderItem(col).text().replace(" ", "")
+                if "借方" in header:
+                    debit_col = col
+                if "貸方" in header:
+                    credit_col = col
+                if "餘額" in header:
+                    balance_col = col
+            # Draw first pinned row (sheet currency)
+            painter.fillRect(0, y1, visible_rect.width(), row_height, QColor(240, 240, 240))
+            font = painter.font()
+            font.setBold(True)
+            painter.setFont(font)
+            for col in range(col_count):
+                x = x_positions[col]
+                w = col_widths[col]
+                painter.drawRect(x, y1, w, row_height)
+                text = ""
+                if col == debit_col:
+                    text = format_number(debit_sum)
+                elif col == credit_col:
+                    text = format_number(credit_sum)
+                elif col == balance_col:
+                    text = balance_str
+                painter.drawText(x + 6, y1 + row_height//2 + 5, text)
+            # Draw second pinned row (HKD)
+            painter.fillRect(0, y2, visible_rect.width(), row_height, QColor(220, 220, 220))
+            for col in range(col_count):
+                x = x_positions[col]
+                w = col_widths[col]
+                painter.drawRect(x, y2, w, row_height)
+                text = ""
+                if col == debit_col:
+                    text = format_number(debit_sum * rate)
+                elif col == credit_col:
+                    text = format_number(credit_sum * rate)
+                elif col == balance_col:
+                    text = hkd_balance_str
+                painter.drawText(x + 6, y2 + row_height//2 + 5, text)
+        finally:
+            painter.end()
 
     def _on_cell_changed(self, row, column):
         """Track user edits by adding row to user_added_rows"""
@@ -195,7 +206,68 @@ class ExcelTable(QTableWidget):
                 bal_item.setText(bal_text)
                 bal_item.setFlags(bal_item.flags() & ~Qt.ItemIsEditable)
             self.blockSignals(False)
+        self.update_pinned_rows()
         self._auto_save()
+
+    def update_pinned_rows(self):
+        self.blockSignals(True)
+        debit_sum, credit_sum = self.sum_columns()
+        balance = debit_sum - credit_sum
+        rate = getattr(self, "exchange_rate", 1.0)
+        hkd_balance = balance * rate
+        balance_col = None
+        debit_col = None
+        credit_col = None
+        for col in range(self.columnCount()):
+            header = self.horizontalHeaderItem(col).text().replace(" ", "")
+            if "餘額" in header:
+                balance_col = col
+            if "借方" in header:
+                debit_col = col
+            if "貸方" in header:
+                credit_col = col
+        last_row = self.rowCount() - 2
+        last_row2 = self.rowCount() - 1
+        def format_number(value):
+            abs_value = abs(value)
+            formatted = f"{abs_value:,.2f}" if abs_value >= 1000 else f"{abs_value:.2f}"
+            return f"({formatted})" if value < 0 else formatted
+        # Sheet currency row
+        for col in range(self.columnCount()):
+            item = self.item(last_row, col)
+            if not item:
+                item = QTableWidgetItem()
+                self.setItem(last_row, col, item)
+            # Only set flags if not already read-only
+            if item.flags() & Qt.ItemIsEditable:
+                item.setFlags(item.flags() & ~Qt.ItemIsEditable)
+            item.setBackground(QColor(240, 240, 240))
+            if col == debit_col:
+                item.setText(format_number(debit_sum))
+            elif col == credit_col:
+                item.setText(format_number(credit_sum))
+            elif col == balance_col:
+                item.setText(format_number(balance))
+            else:
+                item.setText("")
+        # HKD row
+        for col in range(self.columnCount()):
+            item = self.item(last_row2, col)
+            if not item:
+                item = QTableWidgetItem()
+                self.setItem(last_row2, col, item)
+            if item.flags() & Qt.ItemIsEditable:
+                item.setFlags(item.flags() & ~Qt.ItemIsEditable)
+            item.setBackground(QColor(220, 220, 220))
+            if col == debit_col:
+                item.setText(format_number(debit_sum * rate))
+            elif col == credit_col:
+                item.setText(format_number(credit_sum * rate))
+            elif col == balance_col:
+                item.setText(format_number(hkd_balance))
+            else:
+                item.setText("")
+        self.blockSignals(False)
 
     def setHorizontalHeaderLabels(self, labels):
         super().setHorizontalHeaderLabels(labels)
@@ -470,18 +542,16 @@ class ExcelTable(QTableWidget):
                 debit_col = col
             if "貸方" in header:
                 credit_col = col
-        # Calculate totals
-        if credit_col is not None:  # Always calculate credit sum if column exists
-            for row in range(self.rowCount() - 2):  # Exclude pinned rows
+        # Calculate totals (exclude last two pinned rows)
+        for row in range(self.rowCount() - 2):
+            if credit_col is not None:
                 credit_item = self.item(row, credit_col)
                 try:
                     credit_text = credit_item.text().replace(',', '') if credit_item and credit_item.text() else '0'
                     credit_sum += float(credit_text) if credit_text else 0.0
                 except Exception:
                     pass
-
-        if debit_col is not None:  # Only calculate debit sum if column exists
-            for row in range(self.rowCount() - 2):  # Exclude pinned rows
+            if debit_col is not None:
                 debit_item = self.item(row, debit_col)
                 try:
                     debit_text = debit_item.text().replace(',', '') if debit_item and debit_item.text() else '0'

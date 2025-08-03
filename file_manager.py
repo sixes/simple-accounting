@@ -42,41 +42,49 @@ class FileManager:
 
         # Save all sheets
         for i in range(self.main_window.tabs.count()):
-            sheet = self.main_window.tabs.widget(i)
+            tab = self.main_window.tabs.widget(i)
+            tab_name = self.main_window.tabs.tabText(i)
+            if tab_name == "+":  # Skip the plus tab
+                continue
+            # Only call .data() on real sheet tabs
+            sheet_data = tab.data()
             try:
-                sheet_data = sheet.data()
-                if hasattr(sheet, '_custom_headers'):
-                    sheet_data["headers"] = sheet._custom_headers
+                if hasattr(tab, '_custom_headers'):
+                    sheet_data["headers"] = tab._custom_headers
 
                 # Get exchange rate if available
-                exchange_rate = getattr(sheet, "exchange_rate", 1.0)
-                tab_text = getattr(sheet, 'name', self.main_window.tabs.tabText(i))
-                if tab_text in ["銷售收入", "銷售成本", "銀行費用", "利息收入", "應付費用"]:
+                exchange_rate = getattr(tab, "exchange_rate", 1.0)
+                # Only save user-added rows for aggregate sheets (no generated data)
+                if tab_name in [
+                    "銷售收入", "銷售成本", "銀行費用", "利息收入", "應付費用", "董事往來", "工資"
+                ]:
                     sheet_data = {"cells": {}, "spans": []}
                 # Get sheet type
-                if "-" in tab_text:
+                if "-" in tab_name:
                     sheet_type = "bank"
-                elif tab_text in ["銷售收入", "銷售成本", "銀行費用", "利息收入", "應付費用", "董事往來", "工資", "商業登記證書", "秘書費", "審計費"]:
+                elif tab_name in [
+                    "銷售收入", "銷售成本", "銀行費用", "利息收入", "應付費用", "董事往來", "工資", "商業登記證書", "秘書費", "審計費"
+                ]:
                     sheet_type = "aggregate"
                 else:
                     sheet_type = "regular"
 
                 # Save user_added_rows if it exists
                 user_added_data = None
-                if hasattr(sheet, 'user_added_rows'):
-                    user_added_data = list(sheet.user_added_rows) if sheet.user_added_rows else None
+                if hasattr(tab, 'user_added_rows'):
+                    user_added_data = list(tab.user_added_rows) if tab.user_added_rows else None
 
                 sheet_info = {
-                    "name": tab_text,
+                    "name": tab_name,
                     "type": sheet_type,
                     "data": sheet_data,
                     "exchange_rate": exchange_rate,
-                    "currency": getattr(sheet, "currency", ""),
+                    "currency": getattr(tab, "currency", ""),
                     "user_added_rows": user_added_data
                 }
 
                 data["sheets"].append(sheet_info)
-                logger.info(f"Successfully added sheet '{tab_text}' to save data")
+                logger.info(f"Successfully added sheet '{tab_name}' to save data")
             except Exception as e:
                 logger.error(f"Error saving sheet {self.main_window.tabs.tabText(i)}: {e}")
                 import traceback
@@ -181,6 +189,9 @@ class FileManager:
         # Second pass: load data and add sheets in correct order
         tab_order = data.get("tab_order", [sheet["name"] for sheet in data.get("sheets", [])])
         logger.info(f"tab_order: {tab_order}")
+        aggregate_names = [
+            "銷售收入", "銷售成本", "銀行費用", "利息收入", "應付費用", "董事往來", "工資"
+        ]
         for sheet_name in tab_order:
             if sheet_name in temp_sheets:
                 sheet_info = next((s for s in data["sheets"] if s["name"] == sheet_name), None)
@@ -188,22 +199,22 @@ class FileManager:
                     table = temp_sheets[sheet_name]
                     try:
                         logger.info(f"Loading data for sheet '{sheet_name}'")
-                        table.load_data(sheet_info["data"])
-
-                        if "user_added_rows" in sheet_info and sheet_info["user_added_rows"]:
-                            table.user_added_rows = set(sheet_info["user_added_rows"])
-
+                        if sheet_name in aggregate_names:
+                            # Do NOT call table.load_data for any aggregate sheet
+                            if sheet_name == "董事往來" and "user_added_rows" in sheet_info and sheet_info["user_added_rows"]:
+                                table.user_added_rows = set(sheet_info["user_added_rows"])
+                        else:
+                            table.load_data(sheet_info["data"])
+                            if "user_added_rows" in sheet_info and sheet_info["user_added_rows"]:
+                                table.user_added_rows = set(sheet_info["user_added_rows"])
                         if "exchange_rate" in sheet_info:
                             table.set_exchange_rate(sheet_info["exchange_rate"])
                             if hasattr(table, "exchange_rate_input"):
                                 table.exchange_rate_input.setValue(sheet_info["exchange_rate"])
-
                         if "currency" in sheet_info:
                             table.currency = sheet_info["currency"]
-
                         self.main_window.tabs.addTab(table, sheet_name)
                         logger.info(f"loading {sheet_info}")
-
                     except Exception as e:
                         logger.error(f"Error loading data for sheet {sheet_name}: {e}")
                         import traceback
