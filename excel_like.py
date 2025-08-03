@@ -145,13 +145,13 @@ class ExcelLike(QMainWindow):
             tab_name = self.tabs.tabText(index)
             if tab_name == "銷售收入":
                 print("bank feeeeeeeeeeee")
-                self.sheet_manager.refresh_aggregate_sheet("销售收入", "借     方")
+                self.sheet_manager.refresh_aggregate_sheet("销售收入", "貸     方")
             elif tab_name == "銷售成本":
-                self.sheet_manager.refresh_aggregate_sheet("销售成本", "貸     方")
+                self.sheet_manager.refresh_aggregate_sheet("销售成本", "借     方")
             elif tab_name == "銀行費用":
-                self.sheet_manager.refresh_aggregate_sheet("银行费用", "貸     方")
+                self.sheet_manager.refresh_aggregate_sheet("银行费用", "借     方")
             elif tab_name == "利息收入":
-                self.sheet_manager.refresh_aggregate_sheet("利息收入", "借     方")
+                self.sheet_manager.refresh_aggregate_sheet("利息收入", "貸     方")
             elif tab_name == "應付費用":
                 self.sheet_manager.refresh_aggregate_sheet("董事往来", "貸     方")
             elif tab_name == "董事往來":
