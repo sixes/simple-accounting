@@ -319,6 +319,10 @@ class ExcelTable(QTableWidget):
         self._auto_save()
 
     def insertRow(self, row):
+        # For aggregate sheets, prevent inserting between title rows (0 and 1)
+        if hasattr(self, 'name') and self.name in ["銷售收入", "銷售成本", "銀行費用", "利息收入", "應付費用", "董事往來"]:
+            if row <= 1:  # Can't insert between or before title rows
+                row = 2  # Insert after title rows instead
         super().insertRow(row)
         self._auto_save()
 
@@ -444,7 +448,22 @@ class ExcelTable(QTableWidget):
                 r = start_row + i
                 c = start_col + j
                 if r < self.rowCount() and c < self.columnCount():
-                    self.setItem(r, c, QTableWidgetItem(val))
+                    # For director sheet, check if target cell is bank data
+                    if hasattr(self, 'name') and self.name == "董事往來":
+                        item = self.item(r, c)
+                        # Skip this cell if it's bank data (has green background)
+                        if item and item.data(Qt.BackgroundRole):
+                            continue
+                    
+                    # Create new item or get existing
+                    new_item = QTableWidgetItem(val)
+                    
+                    # If it's user data in director sheet, mark the row
+                    if hasattr(self, 'name') and self.name == "董事往來":
+                        if r > 1:  # Skip header rows
+                            self.user_added_rows.add(r)
+                    
+                    self.setItem(r, c, new_item)
 
     def merge_cells(self):
         sel = self.selectedRanges()
@@ -464,7 +483,14 @@ class ExcelTable(QTableWidget):
             for col in range(self.columnCount()):
                 item = self.item(row, col)
                 if item and item.text().strip():  # Only save non-empty cells
-                    cells[(row, col)] = item.text()
+                    # For director sheet, don't save bank-generated data (cells with green background)
+                    if hasattr(self, 'name') and self.name == "董事往來":
+                        # Only save cells that don't have green background (user data)
+                        if not item.data(Qt.BackgroundRole) or item.data(Qt.BackgroundRole) != QColor(200, 255, 200):
+                            cells[(row, col)] = item.text()
+                    else:
+                        # For other sheets, save all data normally
+                        cells[(row, col)] = item.text()
         spans = []
         for row in range(self.rowCount()):
             for col in range(self.columnCount()):
@@ -516,12 +542,23 @@ class ExcelTable(QTableWidget):
         # Handle Ctrl+V for paste
         if event.key() == Qt.Key_Delete:
             for item in self.selectedItems():
-                if item.flags() & Qt.ItemIsEditable:  # Check if cell is editable
-                    item.setText("")
+                # For director sheet, also check for background color (bank data)
+                if hasattr(self, 'name') and self.name == "董事往來":
+                    if item.flags() & Qt.ItemIsEditable and not item.data(Qt.BackgroundRole):
+                        item.setText("")
+                else:
+                    if item.flags() & Qt.ItemIsEditable:
+                        item.setText("")
             if self.auto_save_callback:
                 self.auto_save_callback()
             return
         if event.matches(QKeySequence.Paste):
+            # For director sheet, prevent pasting into bank data rows
+            if hasattr(self, 'name') and self.name == "董事往來":
+                # Check if any selected cell is bank data
+                for item in self.selectedItems():
+                    if item and item.data(Qt.BackgroundRole):
+                        return  # Abort paste if trying to paste into bank data
             self.paste_cells()
             return
         super().keyPressEvent(event)

@@ -1,9 +1,9 @@
 from PySide6.QtWidgets import (
     QMainWindow, QTabWidget, QLineEdit, QLabel, QHBoxLayout, QVBoxLayout,
     QWidget, QInputDialog, QDateEdit, QDialog, QMenu, QMessageBox, QDoubleSpinBox,
-    QToolButton, QTabBar
+    QToolButton, QTabBar, QApplication
 )
-from PySide6.QtGui import QAction
+from PySide6.QtGui import QAction, QPalette
 from PySide6.QtCore import Qt, QDate
 from dialogs import AddSheetDialog
 from sheet_manager import SheetManager
@@ -13,6 +13,10 @@ class ExcelLike(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("bankNote")
+        
+        # Force light theme for better readability
+        self.set_light_theme()
+        
         self.central = QWidget()
         self.setCentralWidget(self.central)
         self.layout = QVBoxLayout(self.central)
@@ -158,8 +162,18 @@ class ExcelLike(QMainWindow):
                 # do nothing, payable data edit or input by user
                 pass
             elif tab_name == "董事往來":
+                # Director sheet: Always regenerate bank data from current bank sheets
+                # and restore user data to original positions
                 current_tab.user_added_rows = getattr(current_tab, 'user_added_rows', set())
+                # Preserve user data with positions before refresh
+                user_data = []
+                if hasattr(self.sheet_manager, 'preserve_director_user_data_with_positions'):
+                    user_data = self.sheet_manager.preserve_director_user_data_with_positions(current_tab)
+                # Always refresh to get latest bank data (not saved to file)
                 self.sheet_manager.refresh_aggregate_sheet("董事往来", "貸     方")
+                # Restore user data to original positions after refresh
+                if user_data and hasattr(self.sheet_manager, 'restore_director_user_data_to_positions'):
+                    self.sheet_manager.restore_director_user_data_to_positions(current_tab, user_data)
 
     def update_tab_name(self, old_name, new_name):
         """Update the tab text when sheet is renamed, with bank/non-bank name validation"""
@@ -496,4 +510,66 @@ class ExcelLike(QMainWindow):
         plus_index = self.tabs.count() - 1
         if hasattr(self.sheet_manager, 'reorder_sheets') and from_index < plus_index and to_index < plus_index:
             self.sheet_manager.reorder_sheets(from_index, to_index)
+
+    def set_light_theme(self):
+        """Force light theme for better readability regardless of system settings"""
+        app = QApplication.instance()
+        if app:
+            # Create a light palette
+            palette = QPalette()
+            
+            # Set light colors for all elements
+            palette.setColor(QPalette.Window, Qt.white)
+            palette.setColor(QPalette.WindowText, Qt.black)
+            palette.setColor(QPalette.Base, Qt.white)
+            palette.setColor(QPalette.AlternateBase, Qt.lightGray)
+            palette.setColor(QPalette.ToolTipBase, Qt.white)
+            palette.setColor(QPalette.ToolTipText, Qt.black)
+            palette.setColor(QPalette.Text, Qt.black)
+            palette.setColor(QPalette.Button, Qt.lightGray)
+            palette.setColor(QPalette.ButtonText, Qt.black)
+            palette.setColor(QPalette.BrightText, Qt.red)
+            palette.setColor(QPalette.Link, Qt.blue)
+            palette.setColor(QPalette.Highlight, Qt.blue)
+            palette.setColor(QPalette.HighlightedText, Qt.white)
+            
+            # Apply the palette to the application
+            app.setPalette(palette)
+            
+            # Also set stylesheet for tables to ensure white background
+            app.setStyleSheet("""
+                QTableWidget {
+                    background-color: white;
+                    alternate-background-color: #f0f0f0;
+                    color: black;
+                    gridline-color: #d0d0d0;
+                }
+                QTableWidget::item {
+                    background-color: white;
+                    color: black;
+                }
+                QTableWidget::item:selected {
+                    background-color: #3daee9;
+                    color: white;
+                }
+                QHeaderView::section {
+                    background-color: #e0e0e0;
+                    color: black;
+                    border: 1px solid #d0d0d0;
+                }
+                QTabWidget::pane {
+                    background-color: white;
+                    border: 1px solid #d0d0d0;
+                }
+                QTabBar::tab {
+                    background-color: #e0e0e0;
+                    color: black;
+                    border: 1px solid #d0d0d0;
+                    padding: 4px 8px;
+                }
+                QTabBar::tab:selected {
+                    background-color: white;
+                    color: black;
+                }
+            """)
 

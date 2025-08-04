@@ -1,8 +1,8 @@
 import pickle
 import os
 import logging
-from PySide6.QtWidgets import QFileDialog, QMessageBox
-from PySide6.QtCore import QDate
+from PySide6.QtWidgets import QFileDialog, QMessageBox, QTableWidgetItem
+from PySide6.QtCore import QDate, Qt
 
 logger = logging.getLogger(__name__)
 
@@ -72,8 +72,31 @@ class FileManager:
 
                 # Save user_added_rows if it exists
                 user_added_data = None
-                if hasattr(tab, 'user_added_rows'):
-                    user_added_data = list(tab.user_added_rows) if tab.user_added_rows else None
+                if hasattr(tab, 'user_added_rows') and tab.user_added_rows:
+                    # For director sheet, save the actual user data with row positions
+                    if sheet_type == "aggregate" and tab_name == "董事往來":
+                        # Use the preserve method to get user data with content and row positions
+                        if hasattr(self.main_window.sheet_manager, 'preserve_director_user_data_with_positions'):
+                            user_added_data = self.main_window.sheet_manager.preserve_director_user_data_with_positions(tab)
+                        else:
+                            # Fallback method - save with actual row positions
+                            user_added_data = []
+                            for row in tab.user_added_rows:
+                                if row < tab.rowCount():
+                                    row_data = []
+                                    has_data = False
+                                    for col in range(tab.columnCount()):
+                                        item = tab.item(row, col)
+                                        text = item.text() if item else ""
+                                        row_data.append(text)
+                                        if text.strip():
+                                            has_data = True
+                                    if has_data:
+                                        # Save as (actual_row_number, row_data) to preserve position
+                                        user_added_data.append((row, row_data))
+                    else:
+                        # For other sheets, just save the row numbers
+                        user_added_data = list(tab.user_added_rows)
 
                 sheet_info = {
                     "name": tab_name,
@@ -203,7 +226,9 @@ class FileManager:
                         if sheet_name in aggregate_names:
                             # Do NOT call table.load_data for any aggregate sheet
                             if sheet_name == "董事往來" and "user_added_rows" in sheet_info and sheet_info["user_added_rows"]:
-                                table.user_added_rows = set(sheet_info["user_added_rows"])
+                                # For director sheet, store user data temporarily for restoration after refresh
+                                user_data = sheet_info["user_added_rows"]
+                                table._pending_user_data = user_data
                         else:
                             table.load_data(sheet_info["data"])
                             if "user_added_rows" in sheet_info and sheet_info["user_added_rows"]:
@@ -225,6 +250,43 @@ class FileManager:
         logger.info("Data loading completed successfully")
         self.last_loaded_company_name = data.get("company", "")
         logger.info(f"last_loaded_company_name set to '{self.last_loaded_company_name}'")
+        
+        # After all sheets are loaded, restore director sheet user data
+        for i in range(self.main_window.tabs.count()):
+            tab = self.main_window.tabs.widget(i)
+            tab_name = self.main_window.tabs.tabText(i)
+            
+            if tab_name == "董事往來" and hasattr(tab, '_pending_user_data'):
+                logger.info(f"Restoring user data for director sheet")
+                user_data = tab._pending_user_data
+                delattr(tab, '_pending_user_data')  # Clean up temporary storage
+                
+                if user_data and isinstance(user_data[0], tuple):
+                    # New format: list of (row, row_data) tuples - restore to original positions
+                    if hasattr(self.main_window.sheet_manager, 'restore_director_user_data_to_positions'):
+                        self.main_window.sheet_manager.restore_director_user_data_to_positions(tab, user_data)
+                    else:
+                        # Fallback: restore to original row positions
+                        tab.user_added_rows = set()
+                        max_row_needed = 0
+                        for original_row, row_data in user_data:
+                            max_row_needed = max(max_row_needed, original_row)
+                        
+                        # Ensure table has enough rows
+                        if max_row_needed >= tab.rowCount():
+                            tab.setRowCount(max_row_needed + 50)
+                        
+                        # Restore data to original positions
+                        for original_row, row_data in user_data:
+                            tab.user_added_rows.add(original_row)
+                            for col, text in enumerate(row_data):
+                                if col < tab.columnCount() and text:
+                                    item = QTableWidgetItem(text)
+                                    item.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable | Qt.ItemIsEditable)
+                                    tab.setItem(original_row, col, item)
+                elif user_data:
+                    # Old format: just row numbers - convert to new format with empty data
+                    tab.user_added_rows = set(user_data)
 
     def auto_save(self):
         """Auto-save current state"""
