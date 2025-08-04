@@ -44,6 +44,7 @@ class FileManager:
         for i in range(self.main_window.tabs.count()):
             tab = self.main_window.tabs.widget(i)
             tab_name = self.main_window.tabs.tabText(i)
+            logger.info(f"save_to_path begin to process {tab_name}")
             if tab_name == "+":  # Skip the plus tab
                 continue
             # Only call .data() on real sheet tabs
@@ -56,7 +57,7 @@ class FileManager:
                 exchange_rate = getattr(tab, "exchange_rate", 1.0)
                 # Only save user-added rows for aggregate sheets (no generated data)
                 if tab_name in [
-                    "銷售收入", "銷售成本", "銀行費用", "利息收入", "應付費用", "董事往來", "工資"
+                    "銷售收入", "銷售成本", "銀行費用", "利息收入", "董事往來",
                 ]:
                     sheet_data = {"cells": {}, "spans": []}
                 # Get sheet type
@@ -262,3 +263,4 @@ class FileManager:
                 # If loading fails, keep the default sheet that was already created
         else:
             logger.info("No company name, keeping default sheet")
+

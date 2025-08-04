@@ -23,25 +23,25 @@ class SheetManager:
         def debug_load_wrapper():
             logger.info("DEBUG WRAPPER: load_callback called!")
             return self.main_window.file_manager.load_file()
-            
+
         def debug_save_wrapper():
             logger.info("DEBUG WRAPPER: save_callback called!")
             return self.main_window.file_manager.save_file()
-            
+
         table.load_callback = debug_load_wrapper
         table.save_callback = debug_save_wrapper
         logger.info(f"DEBUG: Set callbacks on table {name}")
-        
+
         # Try to find and override ExcelTable's actual context menu actions
         logger.info(f"DEBUG: Table attributes: {[attr for attr in dir(table) if 'load' in attr.lower() or 'save' in attr.lower() or 'action' in attr.lower()]}")
-        
+
         # Override the contextMenuEvent method to intercept context menu
         original_context_menu = table.contextMenuEvent
         def custom_context_menu(event):
             logger.info("DEBUG: Custom context menu called!")
             # Call original to get the menu
             original_context_menu(event)
-            
+
         table.contextMenuEvent = custom_context_menu
 
         # Add exchange rate control
@@ -70,11 +70,11 @@ class SheetManager:
         table = ExcelTable(auto_save_callback=self.main_window.auto_save, name=name)
         table.setColumnCount(len(columns))
         table.setHorizontalHeaderLabels(columns)
-        
+
         # Set the load/save callbacks that ExcelTable's context menu should use
         table.load_callback = self.main_window.file_manager.load_file
         table.save_callback = self.main_window.file_manager.save_file
-        
+
         self.main_window.tabs.addTab(table, name)
         self.main_window.sheets.append(table)
         logger.info(f"DEBUG CREATE: Regular sheet '{name}' created, total sheets: {len(self.main_window.sheets)}, total tabs: {self.main_window.tabs.count()}")
@@ -116,11 +116,37 @@ class SheetManager:
 
     def create_director_sheet(self):
         """Create a director sheet"""
-        return self.create_aggregate_sheet("董事往來", "董事往来", "貸     方")
+        table = self.create_aggregate_sheet("董事往來", "董事往来", "借     方")
+        table.user_added_rows = set()
+        table.setRowCount(100 + 2)  # 100 empty rows + 2 header rows
+
+        # Make all cells editable by default
+        table.setEditTriggers(table.EditTrigger.DoubleClicked |
+                           table.EditTrigger.EditKeyPressed |
+                           table.EditTrigger.AnyKeyPressed)
+        return table
 
     def create_payable_sheet(self):
         """Create a payable sheet"""
-        return self.create_aggregate_sheet("應付費用", "董事往来", "貸     方")
+        # Modified columns - removed invoice, added debit before credit
+        columns = ["序 號", "日  期", "對方科目", "摘  要", "借     方", "貸     方", "餘    額", "來源"]
+        table = ExcelTable(auto_save_callback=self.main_window.auto_save, name="應付費用")
+        table.setColumnCount(len(columns))
+        table.setHorizontalHeaderLabels(columns)
+
+        # Set the load/save callbacks
+        table.load_callback = self.main_window.file_manager.load_file
+        table.save_callback = self.main_window.file_manager.save_file
+
+        table.setEditTriggers(table.EditTrigger.DoubleClicked |
+                    table.EditTrigger.EditKeyPressed |
+                    table.EditTrigger.AnyKeyPressed)
+        # Add pinned rows for totals
+        table.setRowCount(100 + 2)  # Regular rows + 2 pinned rows
+
+        self.main_window.tabs.addTab(table, "應付費用")
+        self.main_window.sheets.append(table)
+        return table
 
     def create_interest_sheet(self):
         """Create an interest income sheet"""
@@ -130,7 +156,7 @@ class SheetManager:
         """Create a salary sheet"""
         return self.create_aggregate_sheet("工資", "工資", "借     方")
 
-    def _setup_sales_sheet_structure(self, table):
+    def _setup_currency_sheet_structure(self, table, amount_column_title):
         """Common method to set up sales sheet structure with multi-currency columns"""
         currency_set = set()
         for sheet in self.main_window.sheets:
@@ -140,30 +166,30 @@ class SheetManager:
                     parts = sheet.name.split("-")
                     currency = parts[1] if len(parts) > 1 else ""
                 currency_set.add(currency)
-        
+
         currency_list = sorted(currency_set)
         columns = ["序 號", "日  期", "對方科目", "摘  要", "發票號碼"]
         credit_col_start = len(columns)
         credit_col_count = len(currency_list)
         # Add "貸     方" columns for each currency
-        columns += ["貸     方"] * credit_col_count
+        columns += [amount_column_title] * credit_col_count
         columns += ["餘    額", "來源"]
         excel_headers = [chr(ord('A') + i) for i in range(len(columns))]
         table.setColumnCount(len(columns))
         table.setHorizontalHeaderLabels(excel_headers)
-        table.setRowCount(102)
-        
+        table.setRowCount(2)
+
         # Set title row (row 0) - each credit column gets "貸     方"
         for col, title in enumerate(columns):
             item = QTableWidgetItem(title)
             item.setFlags(item.flags() & ~Qt.ItemIsEditable)
             table.setItem(0, col, item)
-        
+
         # Clear all existing spans first
         for row in range(2):
             for col in range(table.columnCount()):
                 table.setSpan(row, col, 1, 1)
-        
+
         # Set currency sub-header row (row 1) BEFORE merging
         for col in range(table.columnCount()):
             if credit_col_start <= col < credit_col_start + credit_col_count:
@@ -171,26 +197,28 @@ class SheetManager:
                 item = QTableWidgetItem(f"原币({cur})")
                 item.setFlags(item.flags() & ~Qt.ItemIsEditable)
                 table.setItem(1, col, item)
-        
+
         # Now do the merging AFTER all cells are set
         # Merge all "貸     方" columns horizontally in the title row ONLY
         if credit_col_count > 1:
             table.setSpan(0, credit_col_start, 1, credit_col_count)  # Only row 0
-        
-        # For non-credit columns, merge vertically (span 2 rows) 
+            header_item = table.item(0, credit_col_start)
+            header_item.setTextAlignment(Qt.AlignCenter)
+
+
+        # For non-credit columns, merge vertically (span 2 rows)
         for col in range(table.columnCount()):
             if not (credit_col_start <= col < credit_col_start + credit_col_count):
                 table.setSpan(0, col, 2, 1)
-        
+
         return currency_list, credit_col_start, credit_col_count
 
-    def _populate_sales_sheet_data(self, table, subject_filter, currency_list, credit_col_start, credit_col_count):
+    def _populate_currency_sheet_data(self, table, subject_filter, currency_list, amount_col_start, amount_col_count, is_debit):
         """Common method to populate sales sheet data rows"""
-        # Clear only data rows (from row 2 onwards)
         for row in range(2, table.rowCount()):
             for col in range(table.columnCount()):
                 table.setItem(row, col, None)
-        
+
         # Collect bank rows
         bank_rows = []
         for sheet in self.main_window.sheets:
@@ -203,7 +231,7 @@ class SheetManager:
                     subject_item = sheet.item(row, 2)
                     if subject_item and subject_filter in subject_item.text():
                         bank_rows.append((sheet, row, currency))
-        
+
         # Sort bank rows by date
         def get_date_obj(bank_row):
             sheet, row, currency = bank_row
@@ -213,16 +241,17 @@ class SheetManager:
                 return datetime.strptime(date_str, "%Y/%m/%d").date()
             except (ValueError, AttributeError):
                 return datetime.min.date()
-        
+
         bank_rows.sort(key=get_date_obj)
-        
+
+        needed_rows = 2 + len(bank_rows)  # Header rows + data rows
+        table.setRowCount(needed_rows)
+
         # Write data rows starting from row 2
         row_idx = 2
         for i, (sheet, row, currency) in enumerate(bank_rows):
-            if row_idx >= 102:
-                break
             for col in range(table.columnCount()):
-                if col < credit_col_start:
+                if col < amount_col_start:
                     if col == 0:
                         value = str(i+1)
                     elif col == 1:
@@ -242,12 +271,12 @@ class SheetManager:
                     item = QTableWidgetItem(value)
                     item.setFlags(item.flags() & ~Qt.ItemIsEditable)
                     table.setItem(row_idx, col, item)
-                elif credit_col_start <= col < credit_col_start + credit_col_count:
-                    cur = currency_list[col - credit_col_start]
+                elif amount_col_start <= col < amount_col_start + amount_col_count:
+                    cur = currency_list[col - amount_col_start]
                     if cur == currency:
                         # Get DEBIT value from bank sheet (column 4) and write to CREDIT column in sales sheet
-                        debit_item = sheet.item(row, 4)  # Debit column in bank sheet
-                        value = debit_item.text() if debit_item else ""
+                        amount_item = sheet.item(row, 5 if is_debit else 4)  # Debit column in bank sheet
+                        value = amount_item.text() if amount_item else ""
                         logger.info(f"DEBUG: Currency match! cur={cur}, currency={currency}, debit_value='{value}', sheet={sheet.name}, row={row}")
                         item = QTableWidgetItem(value)
                         item.setFlags(item.flags() & ~Qt.ItemIsEditable)
@@ -270,9 +299,31 @@ class SheetManager:
 
     def populate_aggregate_data(self, table, subject_filter, amount_column_title):
         # Special handling for sales sheet with multiple currencies in credit column
-        if subject_filter == "销售收入" and amount_column_title == "貸     方":
-            currency_list, credit_col_start, credit_col_count = self._setup_sales_sheet_structure(table)
-            self._populate_sales_sheet_data(table, subject_filter, currency_list, credit_col_start, credit_col_count)
+        if subject_filter in ["销售收入", "销售成本", "银行费用", "利息收入", "董事往来"]:
+            is_debit = subject_filter in ["销售成本", "银行费用", "董事往来"]
+            currency_list, credit_col_start, credit_col_count = self._setup_currency_sheet_structure(table, amount_column_title)
+
+            user_data = []
+            if subject_filter == "董事往来" and hasattr(table, 'user_added_rows'):
+                user_data = [(row, [table.item(row, col).text() if table.item(row, col) else ""
+                                  for col in range(table.columnCount())])
+                           for row in table.user_added_rows]
+                current_rows = table.rowCount()
+                if current_rows < 102:  # 100 + 2 header rows
+                    table.setRowCount(102)
+
+            self._populate_currency_sheet_data(table, subject_filter, currency_list, credit_col_start, credit_col_count, is_debit)
+            # Restore user data for director sheet
+            if subject_filter == "董事往来":
+                table.user_added_rows = set()
+                for row, row_data in user_data:
+                    if row < table.rowCount():  # Ensure row exists
+                        table.user_added_rows.add(row)
+                        for col, text in enumerate(row_data):
+                            if col < table.columnCount():  # Ensure column exists
+                                item = QTableWidgetItem(text)
+                                item.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable | Qt.ItemIsEditable)
+                                table.setItem(row, col, item)
             return
 
         user_data = []
@@ -359,8 +410,9 @@ class SheetManager:
         current_tab = self.main_window.tabs.currentWidget()
         if current_tab:
             # Special handling for sales sheet refresh
-            if subject_filter == "销售收入" and column_title == "貸     方":
+            if subject_filter in ["销售收入", "销售成本", "银行费用", "利息收入", "董事往来"]:
                 # Check if table has correct multi-currency structure
+                is_debit = subject_filter in ["销售成本", "银行费用", "董事往来"]
                 currency_set = set()
                 for sheet in self.main_window.sheets:
                     if "-" in sheet.name:
@@ -369,21 +421,39 @@ class SheetManager:
                             parts = sheet.name.split("-")
                             currency = parts[1] if len(parts) > 1 else ""
                         currency_set.add(currency)
-                
+
                 expected_cols = 5 + len(currency_set) + 2  # base + currencies + balance + source
                 if current_tab.columnCount() != expected_cols:
                     # Need to recreate table structure completely
-                    currency_list, credit_col_start, credit_col_count = self._setup_sales_sheet_structure(current_tab)
+                    currency_list, credit_col_start, credit_col_count = self._setup_currency_sheet_structure(current_tab, column_title)
                 else:
                     # Table structure is correct, just refresh data without touching structure
                     currency_list = sorted(currency_set)
                     credit_col_start = 5
                     credit_col_count = len(currency_list)
-                
+
+                user_data = []
+                if subject_filter == "董事往来" and hasattr(current_tab, 'user_added_rows'):
+                    user_data = [(row, [current_tab.item(row, col).text() if current_tab.item(row, col) else ""
+                                      for col in range(current_tab.columnCount())])
+                               for row in current_tab.user_added_rows]
+
                 # Always populate data (either after structure setup or just refresh)
-                self._populate_sales_sheet_data(current_tab, subject_filter, currency_list, credit_col_start, credit_col_count)
+                self._populate_currency_sheet_data(current_tab, subject_filter, currency_list, credit_col_start, credit_col_count, is_debit)
+
+                # Restore user data after refresh
+                if subject_filter == "董事往来":
+                    current_tab.user_added_rows = set()
+                    for row, row_data in user_data:
+                        if row < current_tab.rowCount():
+                            current_tab.user_added_rows.add(row)
+                            for col, text in enumerate(row_data):
+                                if col < current_tab.columnCount():
+                                    item = QTableWidgetItem(text)
+                                    item.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable | Qt.ItemIsEditable)
+                                    current_tab.setItem(row, col, item)
                 return
-            
+
             # First preserve any user-added rows for director sheet
             user_data = []
             if hasattr(current_tab, 'user_added_rows') and current_tab.user_added_rows:

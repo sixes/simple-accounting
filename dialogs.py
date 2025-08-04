@@ -117,3 +117,4 @@ class AddSheetDialog(QDialog):
             return (name, "董事往來")
         elif self.salary_radio.isChecked():
             return (name, "工資")
+

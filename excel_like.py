@@ -34,6 +34,7 @@ class ExcelLike(QMainWindow):
         self.sales_sheet = None
         self.cost_sheet = None
         self.user_added_rows = None
+        """
         self.sheet_manager.create_bank_sheet("HSBC-USD")
         self.sales_sheet = self.sheet_manager.create_sales_sheet()
         self.cost_sheet = self.sheet_manager.create_cost_sheet()
@@ -41,6 +42,7 @@ class ExcelLike(QMainWindow):
         self.sheet_manager.create_interest_sheet()
         self.sheet_manager.create_payable_sheet()
         self.sheet_manager.create_director_sheet()
+        """
         # Always add '+' tab at the end (even if no other tabs)
         self._add_plus_tab()
         self.tabs.currentChanged.connect(self._on_tab_or_plus_clicked)
@@ -153,7 +155,8 @@ class ExcelLike(QMainWindow):
             elif tab_name == "利息收入":
                 self.sheet_manager.refresh_aggregate_sheet("利息收入", "貸     方")
             elif tab_name == "應付費用":
-                self.sheet_manager.refresh_aggregate_sheet("董事往来", "貸     方")
+                # do nothing, payable data edit or input by user
+                pass
             elif tab_name == "董事往來":
                 current_tab.user_added_rows = getattr(current_tab, 'user_added_rows', set())
                 self.sheet_manager.refresh_aggregate_sheet("董事往来", "貸     方")
@@ -493,3 +496,4 @@ class ExcelLike(QMainWindow):
         plus_index = self.tabs.count() - 1
         if hasattr(self.sheet_manager, 'reorder_sheets') and from_index < plus_index and to_index < plus_index:
             self.sheet_manager.reorder_sheets(from_index, to_index)
+

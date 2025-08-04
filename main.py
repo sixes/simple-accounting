@@ -2,12 +2,18 @@ import sys
 import logging
 from PySide6.QtWidgets import QApplication
 from excel_like import ExcelLike
+import faulthandler
+faulthandler.enable()
+
+with open("traceback.log", "w") as f:
+    faulthandler.enable(file=f)
 
 # Setup logging to file
 logging.basicConfig(
     filename='banknote.log',
     level=logging.DEBUG,
-    format='%(asctime)s %(levelname)s %(message)s'
+    format='%(asctime)s %(levelname)s %(message)s',
+    filemode='w'
 )
 
 if __name__ == "__main__":
