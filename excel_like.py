@@ -161,6 +161,7 @@ class ExcelLike(QMainWindow):
                 # do nothing, payable data edit or input by user
                 pass
             elif tab_name == "董事往來":
+                # Always refresh to get latest bank data at top (not saved to file)
                 self.sheet_manager.refresh_aggregate_sheet("董事往来", "貸     方")
 
     def update_tab_name(self, old_name, new_name):

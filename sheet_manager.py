@@ -54,7 +54,7 @@ class SheetManager:
         table = ExcelTable(auto_save_callback=self.main_window.auto_save, name=sheet_name, type="aggregate")
         table.setColumnCount(len(columns))
         table.setHorizontalHeaderLabels(columns)
-
+        table.setRowCount(2)  # Just header rows, data will resize it
         self.main_window.tabs.addTab(table, sheet_name)
         self.main_window.sheets.append(table)
         return table
@@ -70,31 +70,9 @@ class SheetManager:
         return self.create_aggregate_sheet("銀行費用", "银行费用", "借     方")
 
     def create_director_sheet(self):
-        """Create a director sheet"""
+        """Create a director sheet - works like other aggregate sheets, no user input"""
         table = self.create_aggregate_sheet("董事往來", "董事往来", "借     方")
-        # Make empty rows editable, but bank data rows remain uneditable
-        table.setEditTriggers(table.EditTrigger.DoubleClicked |
-                           table.EditTrigger.EditKeyPressed |
-                           table.EditTrigger.AnyKeyPressed)
-
-        # Set up cell change tracking for director sheet
-        def on_cell_changed(row, col):
-            if row >= 2:  # Skip header rows
-                item = table.item(row, col)
-                # Only add to user_added_rows if it's not bank data (no green background)
-                if not (item and item.data(Qt.BackgroundRole)):
-                    table.user_added_rows.add(row)
-                    # Trigger auto-save when user edits director sheet
-                    self.main_window.auto_save()
-
-        # Disconnect any existing connection first
-        try:
-            table.cellChanged.disconnect()
-        except:
-            pass
-
-        table.cellChanged.connect(on_cell_changed)
-
+        # No special edit triggers - director sheet is read-only like other aggregate sheets
         return table
 
     def create_payable_sheet(self):
@@ -139,9 +117,8 @@ class SheetManager:
         table.setColumnCount(len(columns))
         table.setHorizontalHeaderLabels(excel_headers)
 
-        # Preserve existing row count if it's already set properly, otherwise set to 2 for headers
-        if table.rowCount() < 102:
-            table.setRowCount(max(102, table.rowCount()))  # Ensure minimum rows for director sheet
+        if table.rowCount() < 2:
+            table.setRowCount(2)
 
         # Set title row (row 0) - each credit column gets "貸     方"
         for col, title in enumerate(columns):
@@ -161,23 +138,36 @@ class SheetManager:
                 item = QTableWidgetItem(f"原币({cur})")
                 item.setFlags(item.flags() & ~Qt.ItemIsEditable)
                 table.setItem(1, col, item)
+            else:
+                # Set empty items for non-currency columns in row 1
+                item = QTableWidgetItem("")
+                item.setFlags(item.flags() & ~Qt.ItemIsEditable)
+                table.setItem(1, col, item)
 
         # Now do the merging AFTER all cells are set
         # Merge all "貸     方" columns horizontally in the title row ONLY
         if credit_col_count > 1:
-            table.setSpan(0, credit_col_start, 1, credit_col_count)  # Only row 0
-            header_item = table.item(0, credit_col_start)
-            header_item.setTextAlignment(Qt.AlignCenter)
+            try:
+                table.setSpan(0, credit_col_start, 1, credit_col_count)  # Only row 0
+                header_item = table.item(0, credit_col_start)
+                if header_item:
+                    header_item.setTextAlignment(Qt.AlignCenter)
+            except Exception as e:
+                print(f"Error setting horizontal span: {e}")
 
         # For non-credit columns, merge vertically (span 2 rows)
         for col in range(table.columnCount()):
             if not (credit_col_start <= col < credit_col_start + credit_col_count):
-                table.setSpan(0, col, 2, 1)
+                try:
+                    table.setSpan(0, col, 2, 1)
+                except Exception as e:
+                    print(f"Error setting vertical span for col {col}: {e}")
 
         return currency_list, credit_col_start, credit_col_count
 
     def _populate_currency_sheet_data(self, table, subject_filter, currency_list, amount_col_start, amount_col_count, is_debit):
         """Common method to populate sales sheet data rows"""
+        # Only clear data rows (row 2 onwards), NOT header rows (0 and 1)
         for row in range(2, table.rowCount()):
             for col in range(table.columnCount()):
                 table.setItem(row, col, None)
@@ -185,15 +175,11 @@ class SheetManager:
         # Collect bank rows
         bank_rows = []
         for sheet in self.main_window.sheets:
-            if "-" in sheet.name:
-                currency = getattr(sheet, "currency", None)
-                if not currency:
-                    parts = sheet.name.split("-")
-                    currency = parts[1] if len(parts) > 1 else ""
+            if sheet.type == "bank":
                 for row in range(sheet.rowCount() - 2):
                     subject_item = sheet.item(row, 2)
                     if subject_item and subject_filter in subject_item.text():
-                        bank_rows.append((sheet, row, currency))
+                        bank_rows.append((sheet, row, sheet.currency))
 
         # Sort bank rows by date
         def get_date_obj(bank_row):
@@ -207,7 +193,7 @@ class SheetManager:
 
         bank_rows.sort(key=get_date_obj)
 
-        needed_rows = max(102, 2 + len(bank_rows))  # Ensure minimum 102 rows for director sheet
+        needed_rows = 2 + len(bank_rows)  # Other sheets only need exact data rows + headers
         table.setRowCount(needed_rows)
 
         # Write data rows starting from row 2
@@ -273,14 +259,15 @@ class SheetManager:
                     table.setItem(row_idx, col, item)
             row_idx += 1
 
+
     def refresh_aggregate_sheet(self, subject_filter, column_title):
         """Refresh the specified aggregate sheet"""
         current_tab = self.main_window.tabs.currentWidget()
         if current_tab:
             # Special handling for sales sheet refresh
-            if subject_filter in ["销售收入", "销售成本", "银行费用", "利息收入", "董事往来"]:
+            if subject_filter in ["销售收入", "销售成本", "银行费用", "利息收入", "董事往来", "董事往來"]:
                 # Check if table has correct multi-currency structure
-                is_debit = subject_filter in ["销售成本", "银行费用", "董事往来"]
+                is_debit = subject_filter in ["销售成本", "银行费用", "董事往来", "董事往來"]
                 currency_set = set()
                 for sheet in self.main_window.sheets:
                     if sheet.type == "bank":
@@ -288,23 +275,11 @@ class SheetManager:
                         currency_set.add(sheet.currency)
 
                 currency_list, credit_col_start, credit_col_count = self._setup_currency_sheet_structure(current_tab, column_title)
-                currency_list = sorted(currency_set)
-                credit_col_start = 5
-                credit_col_count = len(currency_list)
+                # Use the values returned from _setup_currency_sheet_structure, don't override them
+                print(f"DEBUG: currency_list={currency_list}, credit_col_start={credit_col_start}, credit_col_count={credit_col_count}")
 
-                user_data = []
-                if subject_filter == "董事往來":
-                    # Preserve user data with original row positions for director sheet
-                    user_data = self.preserve_director_user_data_with_positions(current_tab)
-                    print(f"user data {user_data}")
-
-                # Always populate data (either after structure setup or just refresh)
+                # Always populate data (director sheet now works like other aggregate sheets)
                 self._populate_currency_sheet_data(current_tab, subject_filter, currency_list, credit_col_start, credit_col_count, is_debit)
-
-                # Restore user data after refresh
-                if subject_filter == "董事往來":
-                    # Restore user data to original positions
-                    self.restore_director_user_data_to_positions(current_tab, user_data)
                 return
 
     def reorder_sheets(self, from_index, to_index):
@@ -359,73 +334,4 @@ class SheetManager:
                     item.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable | Qt.ItemIsEditable)
                     table.setItem(new_row, col, item)
 
-    def preserve_director_user_data_with_positions(self, table):
-        user_data = []
-        for row in table.user_added_rows:
-            if row < table.rowCount():
-                row_data = []
-                has_data = False
-                for col in range(table.columnCount()):
-                    item = table.item(row, col)
-                    text = item.text() if item else ""
-                    if text.strip():
-                        has_data = True
-                        row_data.append(text)
-
-                # Only preserve rows that have actual data, save with original row position
-                if has_data:
-                    user_data.append((row, row_data))
-
-        return user_data
-
-    def restore_director_user_data_to_positions(self, table, user_data):
-        """Restore user data to their original row positions in director sheet"""
-        if not user_data:
-            return
-
-        # Find the maximum row number needed
-        max_row_needed = 0
-        for original_row, row_data in user_data:
-            max_row_needed = max(max_row_needed, original_row)
-
-        # Ensure table has enough rows
-        if max_row_needed >= table.rowCount():
-            table.setRowCount(max(102, max_row_needed + 50))  # Ensure minimum 102 rows
-
-        # Restore data to original positions
-        for original_row, row_data in user_data:
-            table.user_added_rows.add(original_row)
-
-            # Restore the data to the exact original row position
-            for col, text in enumerate(row_data):
-                if col < table.columnCount() and text:  # Only restore non-empty cells
-                    item = QTableWidgetItem(text)
-                    item.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable | Qt.ItemIsEditable)
-                    table.setItem(original_row, col, item)
-
-    def scan_director_user_data(self, table):
-        """Scan director sheet to identify user-added rows automatically"""
-        if not hasattr(table, 'user_added_rows'):
-            table.user_added_rows = set()
-
-        # Find the end of bank-generated data (rows with green background)
-        bank_data_end = 2  # Start after headers
-        for row in range(2, table.rowCount()):
-            item = table.item(row, 0)
-            if item and item.data(Qt.BackgroundRole):
-                # This is bank data (has background color)
-                bank_data_end = row + 1
-            elif item and item.text().strip():
-                # This is user data (no background color but has content)
-                table.user_added_rows.add(row)
-            elif not (item and item.text().strip()):
-                # Empty row, check if any column has data
-                has_data = False
-                for col in range(table.columnCount()):
-                    cell_item = table.item(row, col)
-                    if cell_item and cell_item.text().strip():
-                        has_data = True
-                        break
-                if has_data:
-                    table.user_added_rows.add(row)
 

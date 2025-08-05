@@ -62,8 +62,6 @@ class FileManager:
 
                 # Save user_added_rows if it exists
                 user_added_data = None
-                if tab.type == "aggregate" and tab_name == "董事往來":
-                    user_added_data = self.main_window.sheet_manager.preserve_director_user_data_with_positions(tab)
 
                 sheet_info = {
                     "name": tab_name,
@@ -180,7 +178,7 @@ class FileManager:
         tab_order = data.get("tab_order", [sheet["name"] for sheet in data.get("sheets", [])])
         logger.info(f"tab_order: {tab_order}")
         aggregate_names = [
-            "銷售收入", "銷售成本", "銀行費用", "利息收入", "應付費用", "董事往來", "工資"
+            "銷售收入", "銷售成本", "銀行費用", "利息收入", "董事往來", 
         ]
         for sheet_name in tab_order:
             if sheet_name in temp_sheets:
@@ -188,10 +186,6 @@ class FileManager:
                 if sheet_info:
                     table = temp_sheets[sheet_name]
                     try:
-                        table.load_data(sheet_info["data"])
-                        if sheet_info["user_added_rows"]:
-                            for row, _ in enumerate(sheet_info["user_added_rows"]):
-                                table.user_added_rows.add(row)
                         table.set_exchange_rate(sheet_info["exchange_rate"])
                         if hasattr(table, "exchange_rate_input"):
                             table.exchange_rate_input.setValue(sheet_info["exchange_rate"])
@@ -207,6 +201,7 @@ class FileManager:
         logger.info("Data loading completed successfully")
         self.last_loaded_company_name = data.get("company", "")
         logger.info(f"last_loaded_company_name set to '{self.last_loaded_company_name}'")
+        
 
     def auto_save(self):
         """Auto-save current state"""
