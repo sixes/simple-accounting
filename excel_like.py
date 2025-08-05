@@ -13,10 +13,10 @@ class ExcelLike(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("bankNote")
-        
+
         # Force light theme for better readability
         self.set_light_theme()
-        
+
         self.central = QWidget()
         self.setCentralWidget(self.central)
         self.layout = QVBoxLayout(self.central)
@@ -137,7 +137,7 @@ class ExcelLike(QMainWindow):
                     sheet.exchange_rate_input.setVisible(False)
             current_tab = self.tabs.widget(index)
             # Enable/disable main exchange rate input
-            if hasattr(current_tab, 'name') and '-' in current_tab.name:
+            if current_tab.type == "bank":
                 self.exchange_rate_input.setEnabled(True)
                 if hasattr(current_tab, 'exchange_rate'):
                     self.exchange_rate_input.setValue(current_tab.exchange_rate)
@@ -150,7 +150,6 @@ class ExcelLike(QMainWindow):
 
             tab_name = self.tabs.tabText(index)
             if tab_name == "銷售收入":
-                print("bank feeeeeeeeeeee")
                 self.sheet_manager.refresh_aggregate_sheet("销售收入", "貸     方")
             elif tab_name == "銷售成本":
                 self.sheet_manager.refresh_aggregate_sheet("销售成本", "借     方")
@@ -162,18 +161,7 @@ class ExcelLike(QMainWindow):
                 # do nothing, payable data edit or input by user
                 pass
             elif tab_name == "董事往來":
-                # Director sheet: Always regenerate bank data from current bank sheets
-                # and restore user data to original positions
-                current_tab.user_added_rows = getattr(current_tab, 'user_added_rows', set())
-                # Preserve user data with positions before refresh
-                user_data = []
-                if hasattr(self.sheet_manager, 'preserve_director_user_data_with_positions'):
-                    user_data = self.sheet_manager.preserve_director_user_data_with_positions(current_tab)
-                # Always refresh to get latest bank data (not saved to file)
                 self.sheet_manager.refresh_aggregate_sheet("董事往来", "貸     方")
-                # Restore user data to original positions after refresh
-                if user_data and hasattr(self.sheet_manager, 'restore_director_user_data_to_positions'):
-                    self.sheet_manager.restore_director_user_data_to_positions(current_tab, user_data)
 
     def update_tab_name(self, old_name, new_name):
         """Update the tab text when sheet is renamed, with bank/non-bank name validation"""
@@ -262,35 +250,24 @@ class ExcelLike(QMainWindow):
                 try:
                     new_sheet = self.sheet_manager.create_bank_sheet(tab_name, currency)
                 except TypeError:
-                    new_sheet = self.sheet_manager.create_bank_sheet(tab_name)
-                new_sheet.type = "bank"
-                if currency:
-                    new_sheet.currency = currency
+                    raise
             elif sheet_type == "銷售收入":
                 new_sheet = self.sheet_manager.create_sales_sheet()
-                new_sheet.type = "aggregate"
             elif sheet_type == "銷售成本":
                 new_sheet = self.sheet_manager.create_cost_sheet()
-                new_sheet.type = "aggregate"
             elif sheet_type == "銀行費用":
                 new_sheet = self.sheet_manager.create_bank_fee_sheet()
-                new_sheet.type = "aggregate"
             elif sheet_type == "利息收入":
                 new_sheet = self.sheet_manager.create_interest_sheet()
-                new_sheet.type = "aggregate"
             elif sheet_type == "應付費用":
                 new_sheet = self.sheet_manager.create_payable_sheet()
-                new_sheet.type = "aggregate"
             elif sheet_type == "董事往來":
                 new_sheet = self.sheet_manager.create_director_sheet()
-                new_sheet.type = "aggregate"
             elif sheet_type == "工資":
                 new_sheet = self.sheet_manager.create_salary_sheet()
-                new_sheet.type = "aggregate"
             else:
                 print(f"DEBUG ADD: Creating regular sheet: {tab_name}")
                 new_sheet = self.sheet_manager.create_regular_sheet(tab_name)
-                new_sheet.type = "regular"
             print(f"DEBUG ADD: Sheet created successfully, total tabs now: {self.tabs.count()}")
             # Remove the blank '+' tab before adding the new sheet
             plus_index = self.tabs.count() - 1
@@ -517,7 +494,7 @@ class ExcelLike(QMainWindow):
         if app:
             # Create a light palette
             palette = QPalette()
-            
+
             # Set light colors for all elements
             palette.setColor(QPalette.Window, Qt.white)
             palette.setColor(QPalette.WindowText, Qt.black)
@@ -532,10 +509,10 @@ class ExcelLike(QMainWindow):
             palette.setColor(QPalette.Link, Qt.blue)
             palette.setColor(QPalette.Highlight, Qt.blue)
             palette.setColor(QPalette.HighlightedText, Qt.white)
-            
+
             # Apply the palette to the application
             app.setPalette(palette)
-            
+
             # Also set stylesheet for tables to ensure white background
             app.setStyleSheet("""
                 QTableWidget {
@@ -572,4 +549,3 @@ class ExcelLike(QMainWindow):
                     color: black;
                 }
             """)
-

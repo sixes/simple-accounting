@@ -18,12 +18,14 @@ def excel_column_name(n):
     return name
 
 class ExcelTable(QTableWidget):
-    def __init__(self, rows=100, cols=20, name="", auto_save_callback=None):
+    def __init__(self, type, rows=100, cols=20, name="", auto_save_callback=None):
         super().__init__(rows, cols)
         self.setContextMenuPolicy(Qt.CustomContextMenu)
         self.customContextMenuRequested.connect(self.context_menu)
         self.copied_range = None
         self.name = name
+        assert type != None
+        self.type = type
         self.currency = name.split("-")[1] if "-" in self.name else ""
         self.auto_save_callback = auto_save_callback
         self._custom_headers = None  # Track custom headers
@@ -146,6 +148,7 @@ class ExcelTable(QTableWidget):
             item = self.item(row, column)
             if item and (item.flags() & Qt.ItemIsEditable):
                 self.user_added_rows.add(row)
+                print(f"add user data:{row}")
 
     def _on_item_changed(self, item):
         # Only recalculate if debit, credit, or balance in first row changes
@@ -454,15 +457,15 @@ class ExcelTable(QTableWidget):
                         # Skip this cell if it's bank data (has green background)
                         if item and item.data(Qt.BackgroundRole):
                             continue
-                    
+
                     # Create new item or get existing
                     new_item = QTableWidgetItem(val)
-                    
+
                     # If it's user data in director sheet, mark the row
                     if hasattr(self, 'name') and self.name == "董事往來":
                         if r > 1:  # Skip header rows
                             self.user_added_rows.add(r)
-                    
+
                     self.setItem(r, c, new_item)
 
     def merge_cells(self):

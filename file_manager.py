@@ -44,7 +44,6 @@ class FileManager:
         for i in range(self.main_window.tabs.count()):
             tab = self.main_window.tabs.widget(i)
             tab_name = self.main_window.tabs.tabText(i)
-            logger.info(f"save_to_path begin to process {tab_name}")
             if tab_name == "+":  # Skip the plus tab
                 continue
             # Only call .data() on real sheet tabs
@@ -60,55 +59,22 @@ class FileManager:
                     "銷售收入", "銷售成本", "銀行費用", "利息收入", "董事往來",
                 ]:
                     sheet_data = {"cells": {}, "spans": []}
-                # Get sheet type
-                if "-" in tab_name:
-                    sheet_type = "bank"
-                elif tab_name in [
-                    "銷售收入", "銷售成本", "銀行費用", "利息收入", "應付費用", "董事往來", "工資", "商業登記證書", "秘書費", "審計費"
-                ]:
-                    sheet_type = "aggregate"
-                else:
-                    sheet_type = "regular"
 
                 # Save user_added_rows if it exists
                 user_added_data = None
-                if hasattr(tab, 'user_added_rows') and tab.user_added_rows:
-                    # For director sheet, save the actual user data with row positions
-                    if sheet_type == "aggregate" and tab_name == "董事往來":
-                        # Use the preserve method to get user data with content and row positions
-                        if hasattr(self.main_window.sheet_manager, 'preserve_director_user_data_with_positions'):
-                            user_added_data = self.main_window.sheet_manager.preserve_director_user_data_with_positions(tab)
-                        else:
-                            # Fallback method - save with actual row positions
-                            user_added_data = []
-                            for row in tab.user_added_rows:
-                                if row < tab.rowCount():
-                                    row_data = []
-                                    has_data = False
-                                    for col in range(tab.columnCount()):
-                                        item = tab.item(row, col)
-                                        text = item.text() if item else ""
-                                        row_data.append(text)
-                                        if text.strip():
-                                            has_data = True
-                                    if has_data:
-                                        # Save as (actual_row_number, row_data) to preserve position
-                                        user_added_data.append((row, row_data))
-                    else:
-                        # For other sheets, just save the row numbers
-                        user_added_data = list(tab.user_added_rows)
+                if tab.type == "aggregate" and tab_name == "董事往來":
+                    user_added_data = self.main_window.sheet_manager.preserve_director_user_data_with_positions(tab)
 
                 sheet_info = {
                     "name": tab_name,
-                    "type": sheet_type,
+                    "type": tab.type,
                     "data": sheet_data,
                     "exchange_rate": exchange_rate,
-                    "currency": getattr(tab, "currency", ""),
+                    "currency": tab.currency,
                     "user_added_rows": user_added_data
                 }
 
                 data["sheets"].append(sheet_info)
-                logger.info(f"Successfully added sheet '{tab_name}' to save data")
             except Exception as e:
                 logger.error(f"Error saving sheet {self.main_window.tabs.tabText(i)}: {e}")
                 import traceback
@@ -118,7 +84,7 @@ class FileManager:
         try:
             with open(path, "wb") as f:
                 pickle.dump(data, f)
-            logger.info(f"Successfully saved to {path}")
+            #logger.info(f"Successfully saved to {path}")
         except Exception as e:
             logger.error(f"Failed to write file: {str(e)}")
             raise Exception(f"Failed to write file: {str(e)}")
@@ -179,7 +145,7 @@ class FileManager:
             try:
                 sheet_type = sheet_info.get("type", "regular")
                 sheet_name = sheet_info["name"]
-                logger.info(f"Creating sheet: name='{sheet_name}', type='{sheet_type}'")
+                #logger.info(f"Creating sheet: name='{sheet_name}', type='{sheet_type}'")
 
                 if sheet_type == "bank":
                     table = self.main_window.sheet_manager.create_bank_sheet(sheet_name)
@@ -222,23 +188,14 @@ class FileManager:
                 if sheet_info:
                     table = temp_sheets[sheet_name]
                     try:
-                        logger.info(f"Loading data for sheet '{sheet_name}'")
-                        if sheet_name in aggregate_names:
-                            # Do NOT call table.load_data for any aggregate sheet
-                            if sheet_name == "董事往來" and "user_added_rows" in sheet_info and sheet_info["user_added_rows"]:
-                                # For director sheet, store user data temporarily for restoration after refresh
-                                user_data = sheet_info["user_added_rows"]
-                                table._pending_user_data = user_data
-                        else:
-                            table.load_data(sheet_info["data"])
-                            if "user_added_rows" in sheet_info and sheet_info["user_added_rows"]:
-                                table.user_added_rows = set(sheet_info["user_added_rows"])
-                        if "exchange_rate" in sheet_info:
-                            table.set_exchange_rate(sheet_info["exchange_rate"])
-                            if hasattr(table, "exchange_rate_input"):
-                                table.exchange_rate_input.setValue(sheet_info["exchange_rate"])
-                        if "currency" in sheet_info:
-                            table.currency = sheet_info["currency"]
+                        table.load_data(sheet_info["data"])
+                        if sheet_info["user_added_rows"]:
+                            for row, _ in enumerate(sheet_info["user_added_rows"]):
+                                table.user_added_rows.add(row)
+                        table.set_exchange_rate(sheet_info["exchange_rate"])
+                        if hasattr(table, "exchange_rate_input"):
+                            table.exchange_rate_input.setValue(sheet_info["exchange_rate"])
+                        table.currency = sheet_info["currency"]
                         self.main_window.tabs.addTab(table, sheet_name)
                         logger.info(f"loading {sheet_info}")
                     except Exception as e:
@@ -250,43 +207,6 @@ class FileManager:
         logger.info("Data loading completed successfully")
         self.last_loaded_company_name = data.get("company", "")
         logger.info(f"last_loaded_company_name set to '{self.last_loaded_company_name}'")
-        
-        # After all sheets are loaded, restore director sheet user data
-        for i in range(self.main_window.tabs.count()):
-            tab = self.main_window.tabs.widget(i)
-            tab_name = self.main_window.tabs.tabText(i)
-            
-            if tab_name == "董事往來" and hasattr(tab, '_pending_user_data'):
-                logger.info(f"Restoring user data for director sheet")
-                user_data = tab._pending_user_data
-                delattr(tab, '_pending_user_data')  # Clean up temporary storage
-                
-                if user_data and isinstance(user_data[0], tuple):
-                    # New format: list of (row, row_data) tuples - restore to original positions
-                    if hasattr(self.main_window.sheet_manager, 'restore_director_user_data_to_positions'):
-                        self.main_window.sheet_manager.restore_director_user_data_to_positions(tab, user_data)
-                    else:
-                        # Fallback: restore to original row positions
-                        tab.user_added_rows = set()
-                        max_row_needed = 0
-                        for original_row, row_data in user_data:
-                            max_row_needed = max(max_row_needed, original_row)
-                        
-                        # Ensure table has enough rows
-                        if max_row_needed >= tab.rowCount():
-                            tab.setRowCount(max_row_needed + 50)
-                        
-                        # Restore data to original positions
-                        for original_row, row_data in user_data:
-                            tab.user_added_rows.add(original_row)
-                            for col, text in enumerate(row_data):
-                                if col < tab.columnCount() and text:
-                                    item = QTableWidgetItem(text)
-                                    item.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable | Qt.ItemIsEditable)
-                                    tab.setItem(original_row, col, item)
-                elif user_data:
-                    # Old format: just row numbers - convert to new format with empty data
-                    tab.user_added_rows = set(user_data)
 
     def auto_save(self):
         """Auto-save current state"""
@@ -325,4 +245,3 @@ class FileManager:
                 # If loading fails, keep the default sheet that was already created
         else:
             logger.info("No company name, keeping default sheet")
-
