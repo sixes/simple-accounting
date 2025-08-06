@@ -43,6 +43,10 @@ class ExcelTable(QTableWidget):
         # Enable smooth scrolling and proper updates
         self.setVerticalScrollMode(QTableWidget.ScrollPerPixel)
         self.viewport().setAttribute(Qt.WA_OpaquePaintEvent, False)
+        
+        # Connect scroll events to update viewport - fixes Windows duplicate pinned rows issue
+        self.verticalScrollBar().valueChanged.connect(self._on_scroll)
+        self.horizontalScrollBar().valueChanged.connect(self._on_scroll)
         if False:
             self.setStyleSheet("""
                 QTableWidget {
@@ -77,16 +81,7 @@ class ExcelTable(QTableWidget):
         # First call the parent paintEvent to draw the table contents
         super().paintEvent(event)
 
-        # Get current scroll position
-        current_scroll_pos = self.verticalScrollBar().value()
-
-        # Only paint pinned rows if scroll position has changed
-        if hasattr(self, '_last_paint_pos') and self._last_paint_pos == current_scroll_pos:
-            return
-
-        # Update last paint position
-        self._last_paint_pos = current_scroll_pos
-
+        # Always paint pinned rows - remove optimization that causes Windows issues
         painter = QPainter(self.viewport())
         try:
             viewport = self.viewport()
@@ -98,10 +93,14 @@ class ExcelTable(QTableWidget):
             y1 = visible_rect.height() - 2 * row_height
             y2 = visible_rect.height() - row_height
 
-            # Clear the area where pinned rows will be drawn
+            # Clear the area where pinned rows will be drawn - more robust clearing for Windows
             painter.setCompositionMode(QPainter.CompositionMode_Source)
-            painter.fillRect(0, y1, visible_rect.width(), 2 * row_height, self.palette().window().color())
+            # Use white background instead of palette color for better Windows compatibility
+            painter.fillRect(0, y1, visible_rect.width(), 2 * row_height, QColor(255, 255, 255))
             painter.setCompositionMode(QPainter.CompositionMode_SourceOver)
+            
+            # Add antialiasing for better rendering on Windows
+            painter.setRenderHint(QPainter.Antialiasing, False)
 
             # Calculate sums and balances
             debit_sum, credit_sum = self.sum_columns()
@@ -168,6 +167,23 @@ class ExcelTable(QTableWidget):
         abs_value = abs(value)
         formatted = f"{abs_value:,.2f}" if abs_value >= 1000 else f"{abs_value:.2f}"
         return f"({formatted})" if value < 0 else formatted
+
+    def resizeEvent(self, event):
+        """Handle resize events to ensure proper viewport updates on Windows"""
+        super().resizeEvent(event)
+        # Force viewport update after resize to prevent rendering artifacts
+        self.viewport().update()
+
+    def showEvent(self, event):
+        """Handle show events to ensure proper initial painting on Windows"""
+        super().showEvent(event)
+        # Force initial viewport update when widget becomes visible
+        self.viewport().update()
+
+    def _on_scroll(self):
+        """Handle scroll events to properly update viewport on Windows"""
+        # Force viewport update to prevent duplicate pinned rows on Windows
+        self.viewport().update()
 
     def _on_cell_changed(self, row, column):
         """Track user edits by adding row to user_added_rows"""
