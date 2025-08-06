@@ -31,7 +31,24 @@ class ExcelTable(QTableWidget):
         self.currency = name.split("-")[1] if "-" in self.name else ""
         self.auto_save_callback = auto_save_callback
         self._custom_headers = None  # Track custom headers
-        self.update_headers()
+        
+        # For aggregate sheets, set up 2-row horizontal header
+        if self.type == "aggregate":
+            self.horizontalHeader().setMinimumSectionSize(60)
+            self.horizontalHeader().setDefaultSectionSize(80)
+            # We'll set this up in setup_two_row_headers method
+            # Store pinned height for scroll limiting
+            self._pinned_height = 48  # 2 rows * 24px
+        else:
+            self.update_headers()
+            # For bank sheets, set up bottom margins for pinned rows
+            row_height = 24  # Default row height
+            pinned_height = row_height * 2
+            self.setViewportMargins(0, 0, 0, pinned_height)
+            
+            # Store pinned height for scroll limiting
+            self._pinned_height = pinned_height
+            
         self.horizontalHeader().setStretchLastSection(True)
         self.verticalHeader().setDefaultSectionSize(24)
         self.horizontalHeader().setDefaultSectionSize(80)
@@ -47,6 +64,12 @@ class ExcelTable(QTableWidget):
         # Connect scroll events to update viewport - fixes Windows duplicate pinned rows issue
         self.verticalScrollBar().valueChanged.connect(self._on_scroll)
         self.horizontalScrollBar().valueChanged.connect(self._on_scroll)
+        
+        # Set up a timer to constantly enforce scroll limits
+        from PySide6.QtCore import QTimer
+        self._scroll_limit_timer = QTimer()
+        self._scroll_limit_timer.timeout.connect(self._enforce_scroll_limits)
+        self._scroll_limit_timer.start(100)  # Check every 100ms (reduced frequency for less spam)
         if False:
             self.setStyleSheet("""
                 QTableWidget {
@@ -81,7 +104,6 @@ class ExcelTable(QTableWidget):
         # First call the parent paintEvent to draw the table contents
         super().paintEvent(event)
 
-        # Always paint pinned rows - remove optimization that causes Windows issues
         painter = QPainter(self.viewport())
         try:
             viewport = self.viewport()
@@ -89,7 +111,12 @@ class ExcelTable(QTableWidget):
             row_height = self.rowHeight(0)
             col_count = self.columnCount()
 
-            # Calculate positions for pinned rows (always at bottom)
+            # Paint frozen rows if they exist (for aggregate sheets with 2-row headers)
+            if hasattr(self, '_frozen_row_count') and self._frozen_row_count > 0:
+                self._paint_frozen_rows(painter, visible_rect)
+
+            # Always paint pinned rows at the absolute bottom of the viewport
+            # The viewport margins ensure these don't overlap with scrollable content
             y1 = visible_rect.height() - 2 * row_height
             y2 = visible_rect.height() - row_height
 
@@ -121,18 +148,26 @@ class ExcelTable(QTableWidget):
             is_aggregate_sheet = (hasattr(self, 'name') and 
                                  self.name in ["銷售收入", "銷售成本", "銀行費用", "利息收入", "董事往來"])
             
-            if is_aggregate_sheet and self.rowCount() >= 2:
-                # For aggregate sheets, find currency columns and balance column
-                for col in range(col_count):
-                    # Check row 1 for currency indicators
-                    if col < self.columnCount():
-                        row1_item = self.item(1, col)
-                        if row1_item and "原币(" in row1_item.text():
+            if is_aggregate_sheet:
+                # For aggregate sheets with 2-row headers, use sub_headers to find currency columns
+                if hasattr(self, '_sub_headers'):
+                    for col, sub_header in enumerate(self._sub_headers):
+                        if sub_header and "原币(" in sub_header:
                             currency_cols.append(col)
-                        # Find balance column by checking row 0
-                        row0_item = self.item(0, col)
-                        if row0_item and "餘" in row0_item.text():
+                        # Find balance column by checking main headers
+                        if col < len(self._main_headers) and "餘" in self._main_headers[col]:
                             balance_col = col
+                else:
+                    # Fallback for aggregate sheets without new headers
+                    for col in range(col_count):
+                        if col < self.columnCount():
+                            row1_item = self.item(1, col)
+                            if row1_item and "原币(" in row1_item.text():
+                                currency_cols.append(col)
+                            # Find balance column by checking row 0
+                            row0_item = self.item(0, col)
+                            if row0_item and "餘" in row0_item.text():
+                                balance_col = col
                 # For aggregate sheets, treat all currency columns as credit columns
                 credit_col = currency_cols[0] if currency_cols else None
             else:
@@ -151,6 +186,9 @@ class ExcelTable(QTableWidget):
             font = painter.font()
             font.setBold(True)
             painter.setFont(font)
+            
+            # Set darker pen for frames and text
+            painter.setPen(QColor(80, 80, 80))
 
             # Draw merged cell background for first 3 columns
             if col_count >= 3:
@@ -177,21 +215,29 @@ class ExcelTable(QTableWidget):
                 painter.drawRect(x, y1, w, row_height)
 
                 text = ""
-                if is_aggregate_sheet and col in currency_sums:
-                    # For aggregate sheets, show sum for each currency column
-                    currency, column_sum = currency_sums[col]
-                    text = self._format_number(column_sum)
-                elif col == debit_col:
-                    text = self._format_number(debit_sum)
-                elif col == credit_col:
-                    text = self._format_number(credit_sum)
-                elif col == balance_col:
-                    text = self._format_number(balance)
+                if is_aggregate_sheet:
+                    # For aggregate sheets, only show currency column sums, no balance
+                    if col in currency_sums:
+                        currency, column_sum = currency_sums[col]
+                        text = self._format_number(column_sum)
+                else:
+                    # For bank sheets, show debit/credit/balance as before
+                    if col == debit_col:
+                        text = self._format_number(debit_sum)
+                    elif col == credit_col:
+                        text = self._format_number(credit_sum)
+                    elif col == balance_col:
+                        text = self._format_number(balance)
 
+                # Use darker text color for better visibility
+                painter.setPen(QColor(40, 40, 40))
                 painter.drawText(x + 6, y1 + row_height//2 + 5, text)
 
             # Draw second pinned row (HKD)
             painter.fillRect(0, y2, visible_rect.width(), row_height, QColor(220, 220, 220))
+            
+            # Set darker pen for frames
+            painter.setPen(QColor(80, 80, 80))
             
             # Draw merged cell background for first 3 columns
             if col_count >= 3:
@@ -215,17 +261,22 @@ class ExcelTable(QTableWidget):
                 painter.drawRect(x, y2, w, row_height)
 
                 text = ""
-                if is_aggregate_sheet and col in currency_sums:
-                    # For aggregate sheets, show HKD equivalent for each currency column
-                    currency, column_sum = currency_sums[col]
-                    text = self._format_number(column_sum * rate)
-                elif col == debit_col:
-                    text = self._format_number(debit_sum * rate)
-                elif col == credit_col:
-                    text = self._format_number(credit_sum * rate)
-                elif col == balance_col:
-                    text = self._format_number(hkd_balance)
+                if is_aggregate_sheet:
+                    # For aggregate sheets, only show HKD equivalent for currency columns, no balance
+                    if col in currency_sums:
+                        currency, column_sum = currency_sums[col]
+                        text = self._format_number(column_sum * rate)
+                else:
+                    # For bank sheets, show debit/credit/balance as before
+                    if col == debit_col:
+                        text = self._format_number(debit_sum * rate)
+                    elif col == credit_col:
+                        text = self._format_number(credit_sum * rate)
+                    elif col == balance_col:
+                        text = self._format_number(hkd_balance)
 
+                # Use darker text color for better visibility
+                painter.setPen(QColor(40, 40, 40))
                 painter.drawText(x + 6, y2 + row_height//2 + 5, text)
 
         finally:
@@ -253,6 +304,86 @@ class ExcelTable(QTableWidget):
         """Handle scroll events to properly update viewport on Windows"""
         # Force viewport update to prevent duplicate pinned rows on Windows
         self.viewport().update()
+        
+        # Also enforce scroll limits
+        if hasattr(self, '_pinned_height') and self._pinned_height > 0:
+            self._enforce_scroll_limits()
+
+    def wheelEvent(self, event):
+        """Override wheel events to prevent scrolling into pinned row area"""
+        # Call parent first to get normal wheel handling
+        super().wheelEvent(event)
+        
+        # Then enforce scroll limits after the scroll happens
+        if hasattr(self, '_pinned_height') and self._pinned_height > 0:
+            self._enforce_scroll_limits()
+
+    def scrollContentsBy(self, dx, dy):
+        """Override scroll behavior to prevent scrolling into pinned row area"""
+        # Call parent first to get normal scroll handling
+        super().scrollContentsBy(dx, dy)
+        
+        # Then enforce scroll limits after the scroll happens
+        if hasattr(self, '_pinned_height') and self._pinned_height > 0:
+            self._enforce_scroll_limits()
+    
+    def _enforce_scroll_limits(self):
+        """Enforce scroll limits to prevent scrolling into pinned area"""
+        scrollbar = self.verticalScrollBar()
+        current_scroll = scrollbar.value()
+        
+        # For aggregate sheets, we need to account for frozen rows at the top
+        if hasattr(self, '_frozen_row_count') and self._frozen_row_count > 0:
+            # Calculate actual data rows (total - frozen headers - pinned summary)
+            # Check if the last 2 rows are actually pinned rows by looking at background color
+            last_row_item = self.item(self.rowCount() - 1, 0) if self.rowCount() > 0 else None
+            second_last_row_item = self.item(self.rowCount() - 2, 0) if self.rowCount() > 1 else None
+            
+            has_pinned_rows = False
+            if (last_row_item and last_row_item.background() == QColor(220, 220, 220) and
+                second_last_row_item and second_last_row_item.background() == QColor(240, 240, 240)):
+                has_pinned_rows = True
+                
+            if has_pinned_rows:
+                data_row_count = self.rowCount() - self._frozen_row_count - 2  # Exclude frozen headers and pinned rows
+            else:
+                data_row_count = self.rowCount() - self._frozen_row_count  # Only exclude frozen headers
+                
+            total_content_height = self.rowCount() * self.rowHeight(0)  # All rows including frozen
+            
+            # Get viewport height
+            viewport_height = self.viewport().height()
+            
+            # Maximum scroll should allow seeing all data rows
+            # The frozen rows are handled by viewport margins, pinned rows painted at bottom
+            frozen_height = self._frozen_row_count * self.rowHeight(0)
+            
+            # Ensure user can scroll to see all data rows without being blocked by pinned rows
+            if has_pinned_rows:
+                # Reserve space for pinned rows at bottom
+                max_scroll = max(0, total_content_height - viewport_height + frozen_height + self._pinned_height)
+            else:
+                max_scroll = max(0, total_content_height - viewport_height + frozen_height)
+        else:
+            # For regular bank sheets - they never have actual pinned row content
+            # We always use painted pinned rows at the bottom, so treat all table rows as data
+            data_row_count = self.rowCount()  # All rows are data rows for bank sheets
+            total_content_height = self.rowCount() * self.rowHeight(0)
+            
+            # Get viewport height
+            viewport_height = self.viewport().height()
+            
+            # Maximum scroll should allow seeing all data rows without being blocked by painted pinned rows
+            # Reserve space for painted pinned rows at bottom
+            max_scroll = max(0, total_content_height - viewport_height + self._pinned_height)
+        
+        # CRITICAL FIX: Set the scrollbar's maximum to our calculated value
+        # This ensures Qt allows us to scroll to see all data rows
+        scrollbar.setMaximum(max_scroll)
+        
+        # If current scroll exceeds the limit, force it back
+        if current_scroll > max_scroll:
+            scrollbar.setValue(max_scroll)
 
     def _on_cell_changed(self, row, column):
         """Track user edits by adding row to user_added_rows"""
@@ -267,8 +398,17 @@ class ExcelTable(QTableWidget):
         balance_col = None
         debit_col = None
         credit_col = None
+        
+        # Skip balance calculation for aggregate sheets (they don't use traditional debit/credit structure)
+        if self.type == "aggregate":
+            self._auto_save()
+            return
+            
         for col in range(self.columnCount()):
-            header = self.horizontalHeaderItem(col).text().replace(" ", "")
+            header_item = self.horizontalHeaderItem(col)
+            if header_item is None:
+                continue  # Skip columns without header items
+            header = header_item.text().replace(" ", "")
             if "餘額" in header:
                 balance_col = col
             if "借方" in header:
@@ -276,6 +416,7 @@ class ExcelTable(QTableWidget):
             if "貸方" in header:
                 credit_col = col
         if balance_col is None or debit_col is None or credit_col is None:
+            self._auto_save()
             return
         row = item.row()
         col = item.column()
@@ -338,22 +479,37 @@ class ExcelTable(QTableWidget):
         is_aggregate_sheet = (hasattr(self, 'name') and 
                              self.name in ["銷售收入", "銷售成本", "銀行費用", "利息收入", "董事往來"])
         
+        # For bank sheets, don't create table content in last two rows
+        # We only use painted pinned rows at the bottom viewport
+        if not is_aggregate_sheet:
+            self.blockSignals(False)
+            return
+        
         balance_col = None
         debit_col = None
         credit_col = None
         currency_cols = []
         
-        if is_aggregate_sheet and self.rowCount() >= 2:
-            # For aggregate sheets, find currency columns and balance column
-            for col in range(self.columnCount()):
-                # Check row 1 for currency indicators
-                row1_item = self.item(1, col)
-                if row1_item and "原币(" in row1_item.text():
-                    currency_cols.append(col)
-                # Find balance column by checking row 0
-                row0_item = self.item(0, col)
-                if row0_item and "餘" in row0_item.text():
-                    balance_col = col
+        if is_aggregate_sheet:
+            # For aggregate sheets with 2-row headers, use sub_headers to find currency columns
+            if hasattr(self, '_sub_headers'):
+                for col, sub_header in enumerate(self._sub_headers):
+                    if sub_header and "原币(" in sub_header:
+                        currency_cols.append(col)
+                    # Find balance column by checking main headers
+                    if col < len(self._main_headers) and "餘" in self._main_headers[col]:
+                        balance_col = col
+            else:
+                # Fallback for aggregate sheets without new headers
+                for col in range(self.columnCount()):
+                    # Check row 1 for currency indicators
+                    row1_item = self.item(1, col)
+                    if row1_item and "原币(" in row1_item.text():
+                        currency_cols.append(col)
+                    # Find balance column by checking row 0
+                    row0_item = self.item(0, col)
+                    if row0_item and "餘" in row0_item.text():
+                        balance_col = col
         else:
             # Original logic for regular bank sheets
             for col in range(self.columnCount()):
@@ -392,18 +548,23 @@ class ExcelTable(QTableWidget):
             elif col == 1 or col == 2:
                 # Clear columns 1 and 2 as they will be merged with column 0
                 item.setText("")
-            elif is_aggregate_sheet and col in currency_sums:
-                # For aggregate sheets, show sum for each currency column
-                currency, column_sum = currency_sums[col]
-                item.setText(format_number(column_sum))
-            elif col == debit_col:
-                item.setText(format_number(debit_sum))
-            elif col == credit_col:
-                item.setText(format_number(credit_sum))
-            elif col == balance_col:
-                item.setText(format_number(balance))
+            elif is_aggregate_sheet:
+                # For aggregate sheets, only show currency column sums, no balance
+                if col in currency_sums:
+                    currency, column_sum = currency_sums[col]
+                    item.setText(format_number(column_sum))
+                else:
+                    item.setText("")
             else:
-                item.setText("")
+                # For bank sheets, show debit/credit/balance as before
+                if col == debit_col:
+                    item.setText(format_number(debit_sum))
+                elif col == credit_col:
+                    item.setText(format_number(credit_sum))
+                elif col == balance_col:
+                    item.setText(format_number(balance))
+                else:
+                    item.setText("")
         
         # Merge first 3 columns in the currency row
         if self.columnCount() >= 3:
@@ -425,18 +586,23 @@ class ExcelTable(QTableWidget):
             elif col == 1 or col == 2:
                 # Clear columns 1 and 2 as they will be merged with column 0
                 item.setText("")
-            elif is_aggregate_sheet and col in currency_sums:
-                # For aggregate sheets, show HKD equivalent for each currency column
-                currency, column_sum = currency_sums[col]
-                item.setText(format_number(column_sum * rate))
-            elif col == debit_col:
-                item.setText(format_number(debit_sum * rate))
-            elif col == credit_col:
-                item.setText(format_number(credit_sum * rate))
-            elif col == balance_col:
-                item.setText(format_number(hkd_balance))
+            elif is_aggregate_sheet:
+                # For aggregate sheets, only show HKD equivalent for currency columns, no balance
+                if col in currency_sums:
+                    currency, column_sum = currency_sums[col]
+                    item.setText(format_number(column_sum * rate))
+                else:
+                    item.setText("")
             else:
-                item.setText("")
+                # For bank sheets, show debit/credit/balance as before
+                if col == debit_col:
+                    item.setText(format_number(debit_sum * rate))
+                elif col == credit_col:
+                    item.setText(format_number(credit_sum * rate))
+                elif col == balance_col:
+                    item.setText(format_number(hkd_balance))
+                else:
+                    item.setText("")
         
         # Merge first 3 columns in the HKD row
         if self.columnCount() >= 3:
@@ -463,7 +629,138 @@ class ExcelTable(QTableWidget):
                 else:
                     item.setFlags(item.flags() & ~Qt.ItemIsEditable)
 
+    def setup_two_row_headers(self, main_headers, sub_headers, merged_ranges=None):
+        """Set up 2-row horizontal headers for aggregate sheets"""
+        if self.type != "aggregate":
+            return
+            
+        # Set the column count and basic headers
+        self.setColumnCount(len(main_headers))
+        
+        # Store header information for custom painting and column detection
+        self._main_headers = main_headers
+        self._sub_headers = sub_headers
+        self._merged_ranges = merged_ranges or []
+        
+        # Ensure we have at least 2 rows for the headers
+        if self.rowCount() < 2:
+            self.setRowCount(2)
+        
+        # Set up row 0 (main headers) with merged cells
+        for col, header in enumerate(main_headers):
+            item = QTableWidgetItem(header)
+            item.setFlags(item.flags() & ~Qt.ItemIsEditable)  # Make read-only
+            item.setBackground(QColor(220, 220, 220))  # Light gray background
+            self.setItem(0, col, item)
+        
+        # Set up row 1 (sub headers)
+        for col, sub_header in enumerate(sub_headers):
+            if sub_header:
+                item = QTableWidgetItem(sub_header)
+            else:
+                item = QTableWidgetItem("")
+            item.setFlags(item.flags() & ~Qt.ItemIsEditable)  # Make read-only
+            item.setBackground(QColor(240, 240, 240))  # Lighter gray background
+            self.setItem(1, col, item)
+        
+        # Apply merged ranges to main headers (row 0)
+        for start_col, end_col in self._merged_ranges:
+            if start_col < len(main_headers) and end_col < len(main_headers):
+                # Merge cells in row 0 for the main header
+                self.setSpan(0, start_col, 1, end_col - start_col + 1)
+        
+        # Freeze the first 2 rows so they stay on top
+        self._setup_frozen_rows(2)
+        
+        # Hide the standard horizontal header for aggregate sheets since we use table rows as headers
+        self.horizontalHeader().setVisible(False)
+
+    def _setup_frozen_rows(self, freeze_count):
+        """Setup frozen rows that stay at the top when scrolling"""
+        self._frozen_row_count = freeze_count
+        
+        # Calculate frozen height
+        row_height = self.rowHeight(0)
+        frozen_height = row_height * freeze_count
+        
+        # Set viewport margins to reserve space for frozen headers at top and pinned rows at bottom
+        pinned_height = row_height * 2
+        self.setViewportMargins(0, frozen_height, 0, pinned_height)
+        
+        # Store pinned height for scroll limiting (ensure it's set for aggregate sheets too)
+        self._pinned_height = pinned_height
+        
+        # Force repaint
+        self.viewport().update()
+    
+    def _paint_frozen_rows(self, painter, visible_rect):
+        """Paint frozen rows in the reserved margin area at the top"""
+        if not hasattr(self, '_frozen_row_count') or self._frozen_row_count <= 0:
+            return
+            
+        row_height = self.rowHeight(0)
+        frozen_height = row_height * self._frozen_row_count
+        
+        # Paint in the margin area (above the scrollable content)
+        margin_rect = self.contentsMargins()
+        frozen_y_start = -margin_rect.top()
+        
+        # Clear the frozen area
+        painter.fillRect(0, frozen_y_start, visible_rect.width(), frozen_height, QColor(255, 255, 255))
+        
+        # Draw each frozen row
+        for row in range(self._frozen_row_count):
+            y = frozen_y_start + (row * row_height)
+            
+            # Draw row background
+            if row == 0:
+                painter.fillRect(0, y, visible_rect.width(), row_height, QColor(220, 220, 220))
+            else:
+                painter.fillRect(0, y, visible_rect.width(), row_height, QColor(240, 240, 240))
+            
+            # Draw cells for this row
+            for col in range(self.columnCount()):
+                x = self.columnViewportPosition(col)
+                w = self.columnWidth(col)
+                
+                # Skip columns outside visible area
+                if x + w < 0 or x > visible_rect.width():
+                    continue
+                
+                # Draw cell border with darker pen
+                painter.setPen(QColor(80, 80, 80))
+                painter.drawRect(x, y, w, row_height)
+                
+                # Get cell content
+                item = self.item(row, col)
+                if item:
+                    # Check for merged cells
+                    col_span = self.columnSpan(row, col)
+                    
+                    # Handle merged cells
+                    if col_span > 1:
+                        merge_width = sum(self.columnWidth(col + i) for i in range(col_span))
+                        if row == 0:
+                            painter.fillRect(x, y, merge_width, row_height, QColor(220, 220, 220))
+                        else:
+                            painter.fillRect(x, y, merge_width, row_height, QColor(240, 240, 240))
+                        painter.setPen(QColor(80, 80, 80))
+                        painter.drawRect(x, y, merge_width, row_height)
+                    
+                    # Draw text with darker color
+                    text = item.text()
+                    if text:
+                        painter.setPen(QColor(40, 40, 40))  # Darker text
+                        font = painter.font()
+                        font.setBold(True)
+                        painter.setFont(font)
+                        painter.drawText(x + 6, y + row_height//2 + 5, text)
+
     def update_headers(self):
+        if self.type == "aggregate":
+            # For aggregate sheets, don't use standard header update
+            return
+            
         if self._custom_headers:
             for col, label in enumerate(self._custom_headers):
                 if col < self.columnCount():
@@ -772,23 +1069,40 @@ class ExcelTable(QTableWidget):
         is_aggregate_sheet = (hasattr(self, 'name') and 
                              self.name in ["銷售收入", "銷售成本", "銀行費用", "利息收入", "董事往來"])
         
-        if is_aggregate_sheet and self.rowCount() >= 2:
-            # For aggregate sheets, sum all currency columns
-            for col in range(self.columnCount()):
-                # Check row 1 for currency indicators
-                row1_item = self.item(1, col)
-                if row1_item and "原币(" in row1_item.text():
-                    # Sum this currency column (starting from row 2 to exclude headers)
-                    for row in range(2, self.rowCount()):  # Exclude last two pinned rows
-                        item = self.item(row, col)
-                        if item and item.text():
-                            try:
-                                value_text = item.text().replace(',', '')
-                                value = float(value_text) if value_text else 0.0
-                                # For aggregate sheets, all currency columns represent credit amounts
-                                credit_sum += value
-                            except Exception:
-                                pass
+        if is_aggregate_sheet and self.rowCount() >= 1:
+            # For aggregate sheets with 2-row table headers, use sub_headers to find currency columns
+            if self.type == "aggregate" and hasattr(self, '_sub_headers'):
+                for col, sub_header in enumerate(self._sub_headers):
+                    if sub_header and "原币(" in sub_header:
+                        # Sum this currency column (starting from row 2 for aggregate sheets with table headers)
+                        start_row = 2
+                        for row in range(start_row, self.rowCount()):
+                            item = self.item(row, col)
+                            if item and item.text():
+                                try:
+                                    value_text = item.text().replace(',', '')
+                                    value = float(value_text) if value_text else 0.0
+                                    # For aggregate sheets, all currency columns represent credit amounts
+                                    credit_sum += value
+                                except Exception:
+                                    pass
+            else:
+                # Fallback to old method
+                for col in range(self.columnCount()):
+                    # Check row 1 for currency indicators
+                    row1_item = self.item(1, col)
+                    if row1_item and "原币(" in row1_item.text():
+                        # Sum this currency column (starting from row 2 to exclude headers)
+                        for row in range(2, self.rowCount()):
+                            item = self.item(row, col)
+                            if item and item.text():
+                                try:
+                                    value_text = item.text().replace(',', '')
+                                    value = float(value_text) if value_text else 0.0
+                                    # For aggregate sheets, all currency columns represent credit amounts
+                                    credit_sum += value
+                                except Exception:
+                                    pass
         else:
             # Original logic for regular bank sheets
             for col in range(self.columnCount()):
@@ -798,8 +1112,22 @@ class ExcelTable(QTableWidget):
                 if "貸方" in header:
                     credit_col = col
                     
-            # Calculate totals (exclude last two pinned rows)
-            for row in range(self.rowCount() - 2):
+            # Calculate totals (exclude pinned rows from sum - they are NOT data rows)
+            # The pinned rows are artificial summary rows created by update_pinned_rows()
+            # We need to exclude them from calculation but still show all actual data rows
+            effective_row_count = self.rowCount()
+            
+            # Check if the last two rows are pinned rows (have special background colors)
+            last_row_item = self.item(self.rowCount() - 1, 0) if self.rowCount() > 0 else None
+            second_last_row_item = self.item(self.rowCount() - 2, 0) if self.rowCount() > 1 else None
+            
+            has_pinned_rows = False
+            if (last_row_item and last_row_item.background() == QColor(220, 220, 220) and
+                second_last_row_item and second_last_row_item.background() == QColor(240, 240, 240)):
+                has_pinned_rows = True
+                effective_row_count = self.rowCount() - 2
+            
+            for row in range(effective_row_count):
                 if credit_col is not None:
                     credit_item = self.item(row, credit_col)
                     try:
@@ -825,31 +1153,69 @@ class ExcelTable(QTableWidget):
                 self.name in ["銷售收入", "銷售成本", "銀行費用", "利息收入", "董事往來"]):
             return currency_sums
             
-        if self.rowCount() < 2:
+        if self.rowCount() < 1:
             return currency_sums
         
-        # Find currency columns and their currencies
-        for col in range(self.columnCount()):
-            row1_item = self.item(1, col)
-            if row1_item and "原币(" in row1_item.text():
-                # Extract currency from text like "原币(USD)"
-                currency = row1_item.text().split("(")[1].split(")")[0]
-                column_sum = 0.0
-                
-                # Sum this currency column (starting from row 2 to exclude headers)
-                # For aggregate sheets, exclude the last two pinned rows if they exist
-                end_row = self.rowCount()
-                for row in range(2, end_row):
-                    item = self.item(row, col)
-                    if item and item.text():
-                        try:
-                            value_text = item.text().replace(',', '').strip()
-                            value = float(value_text) if value_text else 0.0
-                            column_sum += value
-                        except Exception as e:
-                            pass
-                            
-                currency_sums[col] = (currency, round(column_sum, 2))
+        # Check if we have pinned rows
+        last_row_item = self.item(self.rowCount() - 1, 0) if self.rowCount() > 0 else None
+        second_last_row_item = self.item(self.rowCount() - 2, 0) if self.rowCount() > 1 else None
+        has_pinned_rows = (last_row_item and last_row_item.background() == QColor(220, 220, 220) and
+                          second_last_row_item and second_last_row_item.background() == QColor(240, 240, 240))
+        
+        # For aggregate sheets with 2-row headers, look at sub_headers instead of row 1
+        if self.type == "aggregate" and hasattr(self, '_sub_headers'):
+            # Find currency columns using stored sub_headers
+            for col, sub_header in enumerate(self._sub_headers):
+                if sub_header and "原币(" in sub_header:
+                    # Extract currency from text like "原币(USD)"
+                    currency = sub_header.split("(")[1].split(")")[0]
+                    column_sum = 0.0
+                    
+                    # Sum this currency column (starting from row 2 for aggregate sheets with table headers)
+                    start_row = 2 if self.type == "aggregate" else 2
+                    end_row = self.rowCount() - 2 if has_pinned_rows else self.rowCount()  # Exclude pinned rows only if they exist
+                    
+                    for row in range(start_row, end_row):
+                        item = self.item(row, col)
+                        if item and item.text():
+                            try:
+                                value_text = item.text().replace(',', '').strip()
+                                value = float(value_text) if value_text else 0.0
+                                column_sum += value
+                            except Exception:
+                                pass
+                                
+                    currency_sums[col] = (currency, round(column_sum, 2))
+                    # Optional: Keep minimal logging for debugging if needed - comment out to reduce spam
+                    # if column_sum > 0:
+                    #     print(f"CURRENCY SUM: {self.name} - {currency}: {column_sum}")
+        else:
+            # Fallback to old method for non-aggregate sheets or sheets without new headers
+            # Find currency columns and their currencies
+            for col in range(self.columnCount()):
+                row1_item = self.item(1, col)
+                if row1_item and "原币(" in row1_item.text():
+                    # Extract currency from text like "原币(USD)"
+                    currency = row1_item.text().split("(")[1].split(")")[0]
+                    column_sum = 0.0
+                    
+                    # Sum this currency column (starting from row 2 to exclude headers)
+                    end_row = self.rowCount() - 2 if has_pinned_rows else self.rowCount()  # Exclude pinned rows only if they exist
+                    
+                    for row in range(2, end_row):
+                        item = self.item(row, col)
+                        if item and item.text():
+                            try:
+                                value_text = item.text().replace(',', '').strip()
+                                value = float(value_text) if value_text else 0.0
+                                column_sum += value
+                            except Exception:
+                                pass
+                                
+                    currency_sums[col] = (currency, round(column_sum, 2))
+                    # Optional: Keep minimal logging for debugging if needed - comment out to reduce spam  
+                    # if column_sum > 0:
+                    #     print(f"CURRENCY SUM: {self.name} - {currency}: {column_sum}")
                 
         return currency_sums
 

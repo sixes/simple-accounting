@@ -107,69 +107,52 @@ class SheetManager:
 
         currency_list = sorted(currency_set)
         print(f"DEBUG SETUP: Final currency list: {currency_list}")
-        columns = ["序 號", "日  期", "對方科目", "摘  要", "發票號碼"]
-        credit_col_start = len(columns)
+        
+        # Set up columns
+        main_headers = ["序 號", "日  期", "對方科目", "摘  要", "發票號碼"]
+        sub_headers = ["", "", "", "", ""]
+        
+        credit_col_start = len(main_headers)
         credit_col_count = len(currency_list)
         print(f"DEBUG SETUP: Credit columns start at {credit_col_start}, count: {credit_col_count}")
-        # Add "貸     方" columns for each currency
-        columns += [amount_column_title] * credit_col_count
-        columns += ["餘    額", "來源"]
-        excel_headers = [chr(ord('A') + i) for i in range(len(columns))]
-        table.setColumnCount(len(columns))
-        table.setHorizontalHeaderLabels(excel_headers)
-
-        if table.rowCount() < 2:
-            table.setRowCount(2)
-
-        # Set title row (row 0) - each credit column gets "貸     方"
-        for col, title in enumerate(columns):
-            item = QTableWidgetItem(title)
-            item.setFlags(item.flags() & ~Qt.ItemIsEditable)
-            table.setItem(0, col, item)
-
-        # Clear all existing spans first
-        for row in range(2):
-            for col in range(table.columnCount()):
-                table.setSpan(row, col, 1, 1)
-
-        # Set currency sub-header row (row 1) BEFORE merging
-        for col in range(table.columnCount()):
-            if credit_col_start <= col < credit_col_start + credit_col_count:
-                cur = currency_list[col - credit_col_start]
-                item = QTableWidgetItem(f"原币({cur})")
-                item.setFlags(item.flags() & ~Qt.ItemIsEditable)
-                table.setItem(1, col, item)
-            else:
-                # Set empty items for non-currency columns in row 1
-                item = QTableWidgetItem("")
-                item.setFlags(item.flags() & ~Qt.ItemIsEditable)
-                table.setItem(1, col, item)
-
-        # Now do the merging AFTER all cells are set
-        # Merge all "貸     方" columns horizontally in the title row ONLY
+        
+        # Add currency columns
+        for currency in currency_list:
+            main_headers.append(amount_column_title)
+            sub_headers.append(f"原币({currency})")
+        
+        # Add final columns
+        main_headers.extend(["餘    額", "來源"])
+        sub_headers.extend(["", ""])
+        
+        # Set up merged ranges for amount columns (if more than one currency)
+        merged_ranges = []
         if credit_col_count > 1:
-            try:
-                table.setSpan(0, credit_col_start, 1, credit_col_count)  # Only row 0
-                header_item = table.item(0, credit_col_start)
-                if header_item:
-                    header_item.setTextAlignment(Qt.AlignCenter)
-            except Exception as e:
-                print(f"Error setting horizontal span: {e}")
-
-        # For non-credit columns, merge vertically (span 2 rows)
-        for col in range(table.columnCount()):
-            if not (credit_col_start <= col < credit_col_start + credit_col_count):
-                try:
-                    table.setSpan(0, col, 2, 1)
-                except Exception as e:
-                    print(f"Error setting vertical span for col {col}: {e}")
+            merged_ranges.append((credit_col_start, credit_col_start + credit_col_count - 1))
+        
+        # Use 2-row headers for aggregate sheets
+        if table.type == "aggregate":
+            table.setup_two_row_headers(main_headers, sub_headers, merged_ranges)
+            # Start data from row 0 instead of row 2
+            if table.rowCount() < 1:
+                table.setRowCount(1)
+        else:
+            # Fallback for non-aggregate sheets (shouldn't happen in this context)
+            table.setColumnCount(len(main_headers))
+            table.setHorizontalHeaderLabels(main_headers)
+            if table.rowCount() < 2:
+                table.setRowCount(2)
 
         return currency_list, credit_col_start, credit_col_count
 
     def _populate_currency_sheet_data(self, table, subject_filter, currency_list, amount_col_start, amount_col_count, is_debit):
         """Common method to populate sales sheet data rows"""
-        # Only clear data rows (row 2 onwards), NOT header rows (0 and 1)
-        for row in range(2, table.rowCount()):
+        # For aggregate sheets with 2-row table headers, start data from row 2
+        # For other sheets, also start from row 2
+        start_data_row = 2
+        
+        # Only clear data rows, NOT header rows
+        for row in range(start_data_row, table.rowCount()):
             for col in range(table.columnCount()):
                 table.setItem(row, col, None)
 
@@ -205,11 +188,12 @@ class SheetManager:
         bank_rows.sort(key=get_date_obj)
         print(f"DEBUG DATA: Total bank rows found: {len(bank_rows)}")
 
-        needed_rows = 2 + len(bank_rows)  # Other sheets only need exact data rows + headers
+        # Calculate needed rows based on sheet type
+        needed_rows = start_data_row + len(bank_rows)
         table.setRowCount(needed_rows)
 
-        # Write data rows starting from row 2
-        row_idx = 2
+        # Write data rows starting from the appropriate row
+        row_idx = start_data_row
         for i, (sheet, row, currency) in enumerate(bank_rows):
             for col in range(table.columnCount()):
                 if col < amount_col_start:
