@@ -152,7 +152,26 @@ class ExcelTable(QTableWidget):
             font.setBold(True)
             painter.setFont(font)
 
-            for col in range(col_count):
+            # Draw merged cell background for first 3 columns
+            if col_count >= 3:
+                merge_width = self.columnWidth(0) + self.columnWidth(1) + self.columnWidth(2)
+                painter.fillRect(0, y1, merge_width, row_height, QColor(240, 240, 240))
+                painter.drawRect(0, y1, merge_width, row_height)
+                
+                # Draw the merged cell text
+                if self.type == "bank":
+                    text = f"本币 TOTAL: {self.currency}"
+                else:
+                    text = "本币种"
+                painter.drawText(6, y1 + row_height//2 + 5, text)
+                
+                # Start drawing individual cells from column 3
+                start_col = 3
+            else:
+                start_col = 0
+
+            # Draw remaining individual cells
+            for col in range(start_col, col_count):
                 x = self.columnViewportPosition(col)
                 w = self.columnWidth(col)
                 painter.drawRect(x, y1, w, row_height)
@@ -173,7 +192,24 @@ class ExcelTable(QTableWidget):
 
             # Draw second pinned row (HKD)
             painter.fillRect(0, y2, visible_rect.width(), row_height, QColor(220, 220, 220))
-            for col in range(col_count):
+            
+            # Draw merged cell background for first 3 columns
+            if col_count >= 3:
+                merge_width = self.columnWidth(0) + self.columnWidth(1) + self.columnWidth(2)
+                painter.fillRect(0, y2, merge_width, row_height, QColor(220, 220, 220))
+                painter.drawRect(0, y2, merge_width, row_height)
+                
+                # Draw the merged cell text
+                text = "本期TOTAL:HKD"
+                painter.drawText(6, y2 + row_height//2 + 5, text)
+                
+                # Start drawing individual cells from column 3
+                start_col = 3
+            else:
+                start_col = 0
+
+            # Draw remaining individual cells
+            for col in range(start_col, col_count):
                 x = self.columnViewportPosition(col)
                 w = self.columnWidth(col)
                 painter.drawRect(x, y2, w, row_height)
@@ -347,7 +383,16 @@ class ExcelTable(QTableWidget):
                 item.setFlags(item.flags() & ~Qt.ItemIsEditable)
             item.setBackground(QColor(240, 240, 240))
             
-            if is_aggregate_sheet and col in currency_sums:
+            if col == 0:
+                # First column shows the currency label
+                if self.type == "bank":
+                    item.setText(f"本币 TOTAL: {self.currency}")
+                else:
+                    item.setText("本币种")
+            elif col == 1 or col == 2:
+                # Clear columns 1 and 2 as they will be merged with column 0
+                item.setText("")
+            elif is_aggregate_sheet and col in currency_sums:
                 # For aggregate sheets, show sum for each currency column
                 currency, column_sum = currency_sums[col]
                 item.setText(format_number(column_sum))
@@ -359,6 +404,10 @@ class ExcelTable(QTableWidget):
                 item.setText(format_number(balance))
             else:
                 item.setText("")
+        
+        # Merge first 3 columns in the currency row
+        if self.columnCount() >= 3:
+            self.setSpan(last_row, 0, 1, 3)
                 
         # HKD row
         for col in range(self.columnCount()):
@@ -370,7 +419,13 @@ class ExcelTable(QTableWidget):
                 item.setFlags(item.flags() & ~Qt.ItemIsEditable)
             item.setBackground(QColor(220, 220, 220))
             
-            if is_aggregate_sheet and col in currency_sums:
+            if col == 0:
+                # First column shows HKD label for both bank and aggregate sheets
+                item.setText("本期TOTAL:HKD")
+            elif col == 1 or col == 2:
+                # Clear columns 1 and 2 as they will be merged with column 0
+                item.setText("")
+            elif is_aggregate_sheet and col in currency_sums:
                 # For aggregate sheets, show HKD equivalent for each currency column
                 currency, column_sum = currency_sums[col]
                 item.setText(format_number(column_sum * rate))
@@ -382,6 +437,10 @@ class ExcelTable(QTableWidget):
                 item.setText(format_number(hkd_balance))
             else:
                 item.setText("")
+        
+        # Merge first 3 columns in the HKD row
+        if self.columnCount() >= 3:
+            self.setSpan(last_row2, 0, 1, 3)
         self.blockSignals(False)
 
     def setHorizontalHeaderLabels(self, labels):
@@ -448,6 +507,10 @@ class ExcelTable(QTableWidget):
     def context_menu(self, pos):
         menu = QMenu(self)
 
+        # Check if this is an aggregate sheet (uneditable)
+        is_aggregate_sheet = (hasattr(self, 'name') and 
+                             self.name in ["銷售收入", "銷售成本", "銀行費用", "利息收入", "董事往來"])
+
         # Table operations
         add_row = QAction("Add Row", self)
         add_col = QAction("Add Column", self)
@@ -457,6 +520,16 @@ class ExcelTable(QTableWidget):
         paste = QAction("Paste", self)
         merge = QAction("Merge Cells", self)
         split = QAction("Unmerge Cells", self)
+
+        # For aggregate sheets, disable editing operations
+        if is_aggregate_sheet:
+            add_row.setEnabled(False)
+            add_col.setEnabled(False)
+            del_row.setEnabled(False)
+            del_col.setEnabled(False)
+            paste.setEnabled(False)
+            merge.setEnabled(False)
+            split.setEnabled(False)
 
         menu.addAction(add_row)
         menu.addAction(add_col)
@@ -473,14 +546,14 @@ class ExcelTable(QTableWidget):
         # File operations
         new_file = QAction("New", self)
         add_sheet = QAction("Add Sheet", self)
-        rename_sheet = QAction("Rename Sheet", self)  # ADDED THIS LINE
+        rename_sheet = QAction("Rename Sheet", self)
         delete_sheet = QAction("Delete Sheet", self)
         save_file = QAction("Save", self)
         load_file = QAction("Load", self)
 
         menu.addAction(new_file)
         menu.addAction(add_sheet)
-        menu.addAction(rename_sheet)  # ADDED THIS LINE
+        menu.addAction(rename_sheet)
         menu.addAction(delete_sheet)
         menu.addSeparator()
         menu.addAction(save_file)
@@ -655,8 +728,15 @@ class ExcelTable(QTableWidget):
             traceback.print_exc()
 
     def keyPressEvent(self, event):
-        # Handle Ctrl+V for paste
+        # Check if this is an aggregate sheet (uneditable)
+        is_aggregate_sheet = (hasattr(self, 'name') and 
+                             self.name in ["銷售收入", "銷售成本", "銀行費用", "利息收入", "董事往來"])
+        
+        # Handle Delete key - disabled for aggregate sheets
         if event.key() == Qt.Key_Delete:
+            if is_aggregate_sheet:
+                return  # Ignore delete key for aggregate sheets
+                
             for item in self.selectedItems():
                 # For director sheet, also check for background color (bank data)
                 if hasattr(self, 'name') and self.name == "董事往來":
@@ -668,13 +748,12 @@ class ExcelTable(QTableWidget):
             if self.auto_save_callback:
                 self.auto_save_callback()
             return
+            
+        # Handle Ctrl+V for paste - disabled for aggregate sheets
         if event.matches(QKeySequence.Paste):
-            # For director sheet, prevent pasting into bank data rows
-            if hasattr(self, 'name') and self.name == "董事往來":
-                # Check if any selected cell is bank data
-                for item in self.selectedItems():
-                    if item and item.data(Qt.BackgroundRole):
-                        return  # Abort paste if trying to paste into bank data
+            if is_aggregate_sheet:
+                return  # Ignore paste for aggregate sheets
+                
             self.paste_cells()
             return
         super().keyPressEvent(event)
@@ -700,7 +779,7 @@ class ExcelTable(QTableWidget):
                 row1_item = self.item(1, col)
                 if row1_item and "原币(" in row1_item.text():
                     # Sum this currency column (starting from row 2 to exclude headers)
-                    for row in range(2, self.rowCount() - 2):  # Exclude last two pinned rows
+                    for row in range(2, self.rowCount()):  # Exclude last two pinned rows
                         item = self.item(row, col)
                         if item and item.text():
                             try:
@@ -759,7 +838,7 @@ class ExcelTable(QTableWidget):
                 
                 # Sum this currency column (starting from row 2 to exclude headers)
                 # For aggregate sheets, exclude the last two pinned rows if they exist
-                end_row = max(2, self.rowCount() - 2) if self.rowCount() > 4 else self.rowCount()
+                end_row = self.rowCount()
                 for row in range(2, end_row):
                     item = self.item(row, col)
                     if item and item.text():

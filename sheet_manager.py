@@ -37,7 +37,6 @@ class SheetManager:
 
     def create_regular_sheet(self, name):
         """Create a regular sheet"""
-        logger.info(f"DEBUG CREATE: Creating regular sheet '{name}'")
         columns = ["序 號", "日  期", "對方科目", "摘   要", "借     方", "貸     方", "借或貸", "餘    額", "發票號碼"]
         table = ExcelTable(auto_save_callback=self.main_window.auto_save, name=name, type="regular")
         table.setColumnCount(len(columns))
@@ -45,7 +44,6 @@ class SheetManager:
 
         self.main_window.tabs.addTab(table, name)
         self.main_window.sheets.append(table)
-        logger.info(f"DEBUG CREATE: Regular sheet '{name}' created, total sheets: {len(self.main_window.sheets)}, total tabs: {self.main_window.tabs.count()}")
         return table
 
     def create_aggregate_sheet(self, sheet_name, subject_filter, column_title):
@@ -104,12 +102,15 @@ class SheetManager:
         currency_set = set()
         for sheet in self.main_window.sheets:
             if sheet.type == "bank":
+                print(f"DEBUG SETUP: Found bank sheet '{sheet.name}' with currency '{sheet.currency}'")
                 currency_set.add(sheet.currency)
 
         currency_list = sorted(currency_set)
+        print(f"DEBUG SETUP: Final currency list: {currency_list}")
         columns = ["序 號", "日  期", "對方科目", "摘  要", "發票號碼"]
         credit_col_start = len(columns)
         credit_col_count = len(currency_list)
+        print(f"DEBUG SETUP: Credit columns start at {credit_col_start}, count: {credit_col_count}")
         # Add "貸     方" columns for each currency
         columns += [amount_column_title] * credit_col_count
         columns += ["餘    額", "來源"]
@@ -174,11 +175,14 @@ class SheetManager:
 
         # Collect bank rows
         bank_rows = []
+        print(f"DEBUG DATA: Looking for subject_filter '{subject_filter}' in bank sheets")
         for sheet in self.main_window.sheets:
             if sheet.type == "bank":
+                print(f"DEBUG DATA: Checking bank sheet '{sheet.name}' (currency: {sheet.currency}) with {sheet.rowCount()} rows")
                 for row in range(sheet.rowCount() - 2):
                     subject_item = sheet.item(row, 2)
                     if subject_item and subject_filter in subject_item.text():
+                        print(f"DEBUG DATA: Found match in {sheet.name} row {row}: '{subject_item.text()}'")
                         bank_rows.append((sheet, row, sheet.currency))
 
         # Sort bank rows by date
@@ -186,12 +190,20 @@ class SheetManager:
             sheet, row, currency = bank_row
             date_item = sheet.item(row, 1)
             date_str = date_item.text() if date_item else ""
-            try:
-                return datetime.strptime(date_str, "%Y/%m/%d").date()
-            except (ValueError, AttributeError):
-                return datetime.min.date()
+            
+            # Try multiple date formats
+            date_formats = ["%Y/%m/%d"]
+            for fmt in date_formats:
+                try:
+                    return datetime.strptime(date_str, fmt).date()
+                except (ValueError, AttributeError) as e:
+                    continue 
+            # If no format works, return minimum date so it appears first
+            print(f"DEBUG DATE: Could not parse date '{date_str}' from {sheet.name} row {row}")
+            return datetime.min.date()
 
         bank_rows.sort(key=get_date_obj)
+        print(f"DEBUG DATA: Total bank rows found: {len(bank_rows)}")
 
         needed_rows = 2 + len(bank_rows)  # Other sheets only need exact data rows + headers
         table.setRowCount(needed_rows)
@@ -226,15 +238,14 @@ class SheetManager:
                     cur = currency_list[col - amount_col_start]
                     if cur == currency:
                         # Get DEBIT value from bank sheet (column 4) and write to CREDIT column in sales sheet
-                        amount_item = sheet.item(row, 5 if is_debit else 4)  # Debit column in bank sheet
+                        # For interest income, we should actually read from credit column since interest is received
+                        amount_item = sheet.item(row, 5 if is_debit else 4)  # Original logic for others
                         value = amount_item.text() if amount_item else ""
-                        logger.info(f"DEBUG: Currency match! cur={cur}, currency={currency}, debit_value='{value}', sheet={sheet.name}, row={row}")
                         item = QTableWidgetItem(value)
                         item.setFlags(item.flags() & ~Qt.ItemIsEditable)
                         item.setData(Qt.BackgroundRole, QColor(200, 255, 200))
                         table.setItem(row_idx, col, item)
                     else:
-                        logger.info(f"DEBUG: Currency mismatch! cur={cur}, currency={currency}")
                         item = QTableWidgetItem("")
                         item.setFlags(item.flags() & ~Qt.ItemIsEditable)
                         item.setData(Qt.BackgroundRole, QColor(200, 255, 200))
@@ -259,17 +270,14 @@ class SheetManager:
             # Special handling for sales sheet refresh
             if subject_filter in ["销售收入", "销售成本", "银行费用", "利息收入", "董事往来", "董事往來"]:
                 # Check if table has correct multi-currency structure
+                # Interest income should be credit (like sales), director should be debit (like costs)
                 is_debit = subject_filter in ["销售成本", "银行费用", "董事往来", "董事往來"]
                 currency_set = set()
                 for sheet in self.main_window.sheets:
                     if sheet.type == "bank":
-                        print(f"name: {sheet.name} sheet.currency {sheet.currency}")
                         currency_set.add(sheet.currency)
 
                 currency_list, credit_col_start, credit_col_count = self._setup_currency_sheet_structure(current_tab, column_title)
-                # Use the values returned from _setup_currency_sheet_structure, don't override them
-                print(f"DEBUG: currency_list={currency_list}, credit_col_start={credit_col_start}, credit_col_count={credit_col_count}")
-
                 # Always populate data (director sheet now works like other aggregate sheets)
                 self._populate_currency_sheet_data(current_tab, subject_filter, currency_list, credit_col_start, credit_col_count, is_debit)
                 return
