@@ -253,17 +253,28 @@ class SheetManager:
         if current_tab:
             # Special handling for sales sheet refresh
             if subject_filter in ["销售收入", "销售成本", "银行费用", "利息收入", "董事往来", "董事往來"]:
+                print(f"DEBUG REFRESH: Refreshing aggregate sheet for '{subject_filter}' with column '{column_title}'")
+                
                 # Check if table has correct multi-currency structure
                 # Interest income should be credit (like sales), director should be debit (like costs)
                 is_debit = subject_filter in ["销售成本", "银行费用", "董事往来", "董事往來"]
+                
+                # Get current currencies from remaining bank sheets
                 currency_set = set()
                 for sheet in self.main_window.sheets:
                     if sheet.type == "bank":
                         currency_set.add(sheet.currency)
+                        print(f"DEBUG REFRESH: Found bank sheet '{sheet.name}' with currency '{sheet.currency}'")
 
+                print(f"DEBUG REFRESH: Current currencies: {sorted(currency_set)}")
+                
+                # CRITICAL: Force complete rebuild of the table structure
                 currency_list, credit_col_start, credit_col_count = self._setup_currency_sheet_structure(current_tab, column_title)
+                
                 # Always populate data (director sheet now works like other aggregate sheets)
                 self._populate_currency_sheet_data(current_tab, subject_filter, currency_list, credit_col_start, credit_col_count, is_debit)
+                
+                print(f"DEBUG REFRESH: Completed refresh for '{subject_filter}', columns: {current_tab.columnCount()}")
                 return
 
     def reorder_sheets(self, from_index, to_index):

@@ -306,6 +306,7 @@ class ExcelLike(QMainWindow):
         if self.tabs.count() > 1:
             self._suppress_plus_tab = True  # Suppress add sheet dialog after delete
             sheet_name = self.tabs.tabText(idx)
+            sheet_to_delete = self.sheets[idx]
             reply = QMessageBox.question(
                 self,
                 "Delete Sheet",
@@ -313,11 +314,51 @@ class ExcelLike(QMainWindow):
                 QMessageBox.Yes | QMessageBox.No
             )
             if reply == QMessageBox.Yes:
+                # Check if this is a bank sheet (has currency)
+                is_bank_sheet = hasattr(sheet_to_delete, 'type') and sheet_to_delete.type == "bank"
+                
                 self.tabs.removeTab(idx)
                 del self.sheets[idx]
                 self._add_plus_tab()
+                
+                # If we deleted a bank sheet, refresh all aggregate sheets to remove the currency column
+                if is_bank_sheet:
+                    print(f"DEBUG: Deleted bank sheet '{sheet_name}', refreshing all aggregate sheets")
+                    self._refresh_all_aggregate_sheets()
+                
                 self.auto_save()
             self._suppress_plus_tab = False
+
+    def _refresh_all_aggregate_sheets(self):
+        """Refresh all aggregate sheets to update currency columns after bank sheet deletion"""
+        print("DEBUG: Refreshing all aggregate sheets after bank sheet deletion")
+        
+        # Save current tab to restore later
+        current_index = self.tabs.currentIndex()
+        
+        # Find and refresh each aggregate sheet
+        for i in range(self.tabs.count()):
+            tab_name = self.tabs.tabText(i)
+            if tab_name in ["銷售收入", "銷售成本", "銀行費用", "利息收入", "董事往來"]:
+                print(f"DEBUG: Refreshing aggregate sheet '{tab_name}'")
+                # Switch to the tab to make it current for refresh
+                self.tabs.setCurrentIndex(i)
+                
+                # Refresh based on sheet type
+                if tab_name == "銷售收入":
+                    self.sheet_manager.refresh_aggregate_sheet("销售收入", "貸     方")
+                elif tab_name == "銷售成本":
+                    self.sheet_manager.refresh_aggregate_sheet("销售成本", "借     方")
+                elif tab_name == "銀行費用":
+                    self.sheet_manager.refresh_aggregate_sheet("银行费用", "借     方")
+                elif tab_name == "利息收入":
+                    self.sheet_manager.refresh_aggregate_sheet("利息收入", "貸     方")
+                elif tab_name == "董事往來":
+                    self.sheet_manager.refresh_aggregate_sheet("董事往来", "貸     方")
+        
+        # Restore original tab selection
+        if current_index < self.tabs.count():
+            self.tabs.setCurrentIndex(current_index)
 
     def close_tab(self, idx):
         """Close tab at given index"""

@@ -634,46 +634,54 @@ class ExcelTable(QTableWidget):
         if self.type != "aggregate":
             return
             
-        # Set the column count and basic headers
-        self.setColumnCount(len(main_headers))
+        print(f"DEBUG SETUP: Setting up headers for {len(main_headers)} columns")
         
-        # Store header information for custom painting and column detection
+        # CRITICAL: Clear all existing spans first to avoid conflicts
+        for row in range(min(10, self.rowCount())):  # Clear spans in first 10 rows  
+            for col in range(min(20, self.columnCount())):  # Clear spans in first 20 columns
+                self.setSpan(row, col, 1, 1)
+        
+        self.setColumnCount(len(main_headers))
+        print(f"DEBUG SETUP: Column count set to {len(main_headers)}")
+        
         self._main_headers = main_headers
         self._sub_headers = sub_headers
         self._merged_ranges = merged_ranges or []
         
-        # Ensure we have at least 2 rows for the headers
         if self.rowCount() < 2:
             self.setRowCount(2)
         
-        # Set up row 0 (main headers) with merged cells
         for col, header in enumerate(main_headers):
             item = QTableWidgetItem(header)
-            item.setFlags(item.flags() & ~Qt.ItemIsEditable)  # Make read-only
-            item.setBackground(QColor(220, 220, 220))  # Light gray background
+            item.setFlags(item.flags() & ~Qt.ItemIsEditable)
+            item.setBackground(QColor(220, 220, 220))
             self.setItem(0, col, item)
         
-        # Set up row 1 (sub headers)
         for col, sub_header in enumerate(sub_headers):
-            if sub_header:
-                item = QTableWidgetItem(sub_header)
-            else:
-                item = QTableWidgetItem("")
-            item.setFlags(item.flags() & ~Qt.ItemIsEditable)  # Make read-only
-            item.setBackground(QColor(240, 240, 240))  # Lighter gray background
+            item = QTableWidgetItem(sub_header if sub_header else "")
+            item.setFlags(item.flags() & ~Qt.ItemIsEditable)
+            item.setBackground(QColor(240, 240, 240))
             self.setItem(1, col, item)
         
-        # Apply merged ranges to main headers (row 0)
+        # Identify currency columns to decide which columns to merge vertically
+        currency_columns = {i for i, h in enumerate(sub_headers) if h and "原币(" in h}
+
+        # Apply horizontal merged ranges to main headers (row 0)
         for start_col, end_col in self._merged_ranges:
             if start_col < len(main_headers) and end_col < len(main_headers):
-                # Merge cells in row 0 for the main header
                 self.setSpan(0, start_col, 1, end_col - start_col + 1)
-        
-        # Freeze the first 2 rows so they stay on top
+                print(f"DEBUG: Horizontally merged credit header at row 0, from col {start_col} to {end_col}")
+
+        # Vertically merge non-currency columns
+        for col in range(len(main_headers)):
+            if col not in currency_columns:
+                self.setSpan(0, col, 2, 1)
+                print(f"DEBUG: Vertically merged non-currency col {col}")
+
         self._setup_frozen_rows(2)
-        
-        # Hide the standard horizontal header for aggregate sheets since we use table rows as headers
         self.horizontalHeader().setVisible(False)
+        
+        print(f"DEBUG SETUP: Headers setup complete, final column count: {self.columnCount()}")
 
     def _setup_frozen_rows(self, freeze_count):
         """Setup frozen rows that stay at the top when scrolling"""
@@ -698,63 +706,100 @@ class ExcelTable(QTableWidget):
         if not hasattr(self, '_frozen_row_count') or self._frozen_row_count <= 0:
             return
             
+        # 1. Count currencies from parent window tabs for debug purposes
+        parent_window = self.window()
+        currencies = []
+        if hasattr(parent_window, 'tabs'):
+            tabs = parent_window.tabs
+            for i in range(tabs.count()):
+                tab_text = tabs.tabText(i)
+                if "-" in tab_text and tab_text != "+":
+                    try:
+                        currencies.append(tab_text.split('-')[-1])
+                    except IndexError:
+                        pass # Should not happen with the check
+        print(f"DEBUG: Found {len(currencies)} bank sheets with currencies: {currencies}")
+
+        # 2. Identify currency columns from sub-headers
+        currency_columns = []
+        if hasattr(self, '_sub_headers'):
+            for col, sub_header in enumerate(self._sub_headers):
+                if sub_header and "原币(" in sub_header:
+                    currency_columns.append(col)
+        print(f"DEBUG: Currency columns found: {currency_columns}")
+
         row_height = self.rowHeight(0)
         frozen_height = row_height * self._frozen_row_count
         
-        # Paint in the margin area (above the scrollable content)
         margin_rect = self.contentsMargins()
         frozen_y_start = -margin_rect.top()
         
         # Clear the frozen area
         painter.fillRect(0, frozen_y_start, visible_rect.width(), frozen_height, QColor(255, 255, 255))
         
-        # Draw each frozen row
+        painted_cells = set() # Track top-left cell of already painted spans
+
         for row in range(self._frozen_row_count):
-            y = frozen_y_start + (row * row_height)
+            # Calculate fixed Y position for frozen rows (they don't scroll)
+            row_y = frozen_y_start + (row * row_height)
             
-            # Draw row background
-            if row == 0:
-                painter.fillRect(0, y, visible_rect.width(), row_height, QColor(220, 220, 220))
-            else:
-                painter.fillRect(0, y, visible_rect.width(), row_height, QColor(240, 240, 240))
-            
-            # Draw cells for this row
             for col in range(self.columnCount()):
+                if self.isColumnHidden(col) or (row, col) in painted_cells:
+                    continue
+
                 x = self.columnViewportPosition(col)
                 w = self.columnWidth(col)
                 
-                # Skip columns outside visible area
                 if x + w < 0 or x > visible_rect.width():
                     continue
                 
-                # Draw cell border with darker pen
-                painter.setPen(QColor(80, 80, 80))
-                painter.drawRect(x, y, w, row_height)
+                row_span = self.rowSpan(row, col)
+                col_span = self.columnSpan(row, col)
+
+                # Simple span detection - if current cell is not top-left of its span, skip
+                # Check if we're the top-left cell of a span by looking at the span values
+                if row_span > 1 or col_span > 1:
+                    # This is a merged cell, check if it's the top-left
+                    is_top_left = True
+                    for check_row in range(max(0, row - row_span + 1), row + 1):
+                        for check_col in range(max(0, col - col_span + 1), col + 1):
+                            if (check_row, check_col) != (row, col):
+                                if self.rowSpan(check_row, check_col) == row_span and self.columnSpan(check_row, check_col) == col_span:
+                                    is_top_left = False
+                                    break
+                        if not is_top_left:
+                            break
+                    
+                    if not is_top_left:
+                        continue
+
+                current_item = self.item(row, col)
+                if not current_item:
+                    continue
+
+                merge_width = sum(self.columnWidth(col + i) for i in range(col_span))
+                merge_height = row_height * row_span
+
+                # Determine background color from the row
+                bg_color = QColor(220, 220, 220) if row == 0 else QColor(240, 240, 240)
                 
-                # Get cell content
-                item = self.item(row, col)
-                if item:
-                    # Check for merged cells
-                    col_span = self.columnSpan(row, col)
-                    
-                    # Handle merged cells
-                    if col_span > 1:
-                        merge_width = sum(self.columnWidth(col + i) for i in range(col_span))
-                        if row == 0:
-                            painter.fillRect(x, y, merge_width, row_height, QColor(220, 220, 220))
-                        else:
-                            painter.fillRect(x, y, merge_width, row_height, QColor(240, 240, 240))
-                        painter.setPen(QColor(80, 80, 80))
-                        painter.drawRect(x, y, merge_width, row_height)
-                    
-                    # Draw text with darker color
-                    text = item.text()
-                    if text:
-                        painter.setPen(QColor(40, 40, 40))  # Darker text
-                        font = painter.font()
-                        font.setBold(True)
-                        painter.setFont(font)
-                        painter.drawText(x + 6, y + row_height//2 + 5, text)
+                painter.fillRect(x, row_y, merge_width, merge_height, bg_color)
+                painter.setPen(QColor(80, 80, 80))
+                painter.drawRect(x, row_y, merge_width, merge_height)
+
+                text = current_item.text()
+                if text:
+                    painter.setPen(QColor(40, 40, 40))
+                    font = painter.font()
+                    font.setBold(True)
+                    painter.setFont(font)
+                    text_y = row_y + merge_height // 2 + 5
+                    painter.drawText(x + 6, text_y, text)
+
+                # Mark the top-left cell of the span as painted
+                painted_cells.add((row, col))
+                if row_span > 1 or col_span > 1:
+                    print(f"DEBUG: Painted merged cell at ({row},{col}) with span ({row_span},{col_span})")
 
     def update_headers(self):
         if self.type == "aggregate":
