@@ -4,10 +4,18 @@ from PySide6.QtWidgets import (
     QToolButton, QTabBar, QApplication
 )
 from PySide6.QtGui import QAction, QPalette
-from PySide6.QtCore import Qt, QDate
+from PySide6.QtCore import Qt, QDate, qInstallMessageHandler
 from dialogs import AddSheetDialog
 from sheet_manager import SheetManager
 from file_manager import FileManager
+import platform
+
+def qt_message_handler(mode, context, message):
+    if "single cell span won't be added" in message:
+        return  # Ignore this specific warning
+    # Handle other messages as needed
+
+qInstallMessageHandler(qt_message_handler)
 
 class ExcelLike(QMainWindow):
     def __init__(self):
@@ -15,7 +23,8 @@ class ExcelLike(QMainWindow):
         self.setWindowTitle("bankNote")
 
         # Force light theme for better readability
-        self.set_light_theme()
+        if platform.system() != "Windows":
+            self.set_light_theme()
 
         self.central = QWidget()
         self.setCentralWidget(self.central)
@@ -353,6 +362,8 @@ class ExcelLike(QMainWindow):
     def auto_save(self):
         """Auto-save current state"""
         # Before saving, update exchange rate in current tab if bank sheet
+        if True:
+            return
         index = self.tabs.currentIndex()
         if index >= 0:
             current_tab = self.tabs.widget(index)

@@ -71,7 +71,7 @@ class FileManager:
                     "currency": tab.currency,
                     "user_added_rows": user_added_data
                 }
-
+                print(f"saving sheet: {sheet_data}")
                 data["sheets"].append(sheet_info)
             except Exception as e:
                 logger.error(f"Error saving sheet {self.main_window.tabs.tabText(i)}: {e}")
@@ -143,10 +143,17 @@ class FileManager:
             try:
                 sheet_type = sheet_info.get("type", "regular")
                 sheet_name = sheet_info["name"]
-                #logger.info(f"Creating sheet: name='{sheet_name}', type='{sheet_type}'")
+                logger.info(f"Creating sheet: name='{sheet_name}', type='{sheet_type}', {sheet_info['data']}")
 
                 if sheet_type == "bank":
                     table = self.main_window.sheet_manager.create_bank_sheet(sheet_name)
+                    # do this: set cell data from sheet_info["data"]
+                    for cell_key, cell_value in sheet_info["data"]["cells"].items():
+                        row = cell_key[0]
+                        col = cell_key[1]
+                        if row < table.rowCount() and col < table.columnCount():
+                            item = QTableWidgetItem(cell_value)
+                            table.setItem(row, col, item)
                 elif sheet_type == "aggregate":
                     if sheet_name == "銷售收入":
                         table = self.main_window.sheet_manager.create_sales_sheet()
@@ -178,7 +185,7 @@ class FileManager:
         tab_order = data.get("tab_order", [sheet["name"] for sheet in data.get("sheets", [])])
         logger.info(f"tab_order: {tab_order}")
         aggregate_names = [
-            "銷售收入", "銷售成本", "銀行費用", "利息收入", "董事往來", 
+            "銷售收入", "銷售成本", "銀行費用", "利息收入", "董事往來",
         ]
         for sheet_name in tab_order:
             if sheet_name in temp_sheets:
@@ -201,7 +208,7 @@ class FileManager:
         logger.info("Data loading completed successfully")
         self.last_loaded_company_name = data.get("company", "")
         logger.info(f"last_loaded_company_name set to '{self.last_loaded_company_name}'")
-        
+
 
     def auto_save(self):
         """Auto-save current state"""

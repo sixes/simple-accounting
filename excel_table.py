@@ -6,6 +6,8 @@ from PySide6.QtWidgets import (
 from PySide6.QtGui import QColor
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QAction, QKeySequence
+from PySide6.QtGui import QPainter, QFont
+
 
 logger = logging.getLogger(__name__)
 
@@ -72,31 +74,42 @@ class ExcelTable(QTableWidget):
             """)
 
     def paintEvent(self, event):
+        # First call the parent paintEvent to draw the table contents
         super().paintEvent(event)
-        from PySide6.QtGui import QPainter, QFont
+
+        # Get current scroll position
+        current_scroll_pos = self.verticalScrollBar().value()
+
+        # Only paint pinned rows if scroll position has changed
+        if hasattr(self, '_last_paint_pos') and self._last_paint_pos == current_scroll_pos:
+            return
+
+        # Update last paint position
+        self._last_paint_pos = current_scroll_pos
+
         painter = QPainter(self.viewport())
         try:
             viewport = self.viewport()
             visible_rect = viewport.rect()
             row_height = self.rowHeight(0)
             col_count = self.columnCount()
-            col_widths = [self.columnWidth(col) for col in range(col_count)]
-            x_positions = [self.columnViewportPosition(col) for col in range(col_count)]
+
+            # Calculate positions for pinned rows (always at bottom)
             y1 = visible_rect.height() - 2 * row_height
             y2 = visible_rect.height() - row_height
+
+            # Clear the area where pinned rows will be drawn
             painter.setCompositionMode(QPainter.CompositionMode_Source)
             painter.fillRect(0, y1, visible_rect.width(), 2 * row_height, self.palette().window().color())
             painter.setCompositionMode(QPainter.CompositionMode_SourceOver)
+
+            # Calculate sums and balances
             debit_sum, credit_sum = self.sum_columns()
             balance = debit_sum - credit_sum
             rate = getattr(self, "exchange_rate", 1.0)
             hkd_balance = balance * rate
-            def format_number(value):
-                abs_value = abs(value)
-                formatted = f"{abs_value:,.2f}" if abs_value >= 1000 else f"{abs_value:.2f}"
-                return f"({formatted})" if value < 0 else formatted
-            balance_str = format_number(balance)
-            hkd_balance_str = format_number(hkd_balance)
+
+            # Find column positions
             debit_col = None
             credit_col = None
             balance_col = None
@@ -108,39 +121,53 @@ class ExcelTable(QTableWidget):
                     credit_col = col
                 if "餘額" in header:
                     balance_col = col
+
             # Draw first pinned row (sheet currency)
             painter.fillRect(0, y1, visible_rect.width(), row_height, QColor(240, 240, 240))
             font = painter.font()
             font.setBold(True)
             painter.setFont(font)
+
             for col in range(col_count):
-                x = x_positions[col]
-                w = col_widths[col]
+                x = self.columnViewportPosition(col)
+                w = self.columnWidth(col)
                 painter.drawRect(x, y1, w, row_height)
+
                 text = ""
                 if col == debit_col:
-                    text = format_number(debit_sum)
+                    text = self._format_number(debit_sum)
                 elif col == credit_col:
-                    text = format_number(credit_sum)
+                    text = self._format_number(credit_sum)
                 elif col == balance_col:
-                    text = balance_str
+                    text = self._format_number(balance)
+
                 painter.drawText(x + 6, y1 + row_height//2 + 5, text)
+
             # Draw second pinned row (HKD)
             painter.fillRect(0, y2, visible_rect.width(), row_height, QColor(220, 220, 220))
             for col in range(col_count):
-                x = x_positions[col]
-                w = col_widths[col]
+                x = self.columnViewportPosition(col)
+                w = self.columnWidth(col)
                 painter.drawRect(x, y2, w, row_height)
+
                 text = ""
                 if col == debit_col:
-                    text = format_number(debit_sum * rate)
+                    text = self._format_number(debit_sum * rate)
                 elif col == credit_col:
-                    text = format_number(credit_sum * rate)
+                    text = self._format_number(credit_sum * rate)
                 elif col == balance_col:
-                    text = hkd_balance_str
+                    text = self._format_number(hkd_balance)
+
                 painter.drawText(x + 6, y2 + row_height//2 + 5, text)
+
         finally:
             painter.end()
+
+    def _format_number(self, value):
+        """Helper method to format numbers consistently"""
+        abs_value = abs(value)
+        formatted = f"{abs_value:,.2f}" if abs_value >= 1000 else f"{abs_value:.2f}"
+        return f"({formatted})" if value < 0 else formatted
 
     def _on_cell_changed(self, row, column):
         """Track user edits by adding row to user_added_rows"""
@@ -148,7 +175,7 @@ class ExcelTable(QTableWidget):
             item = self.item(row, column)
             if item and (item.flags() & Qt.ItemIsEditable):
                 self.user_added_rows.add(row)
-                print(f"add user data:{row}")
+                #print(f"add user data:{row}")
 
     def _on_item_changed(self, item):
         # Only recalculate if debit, credit, or balance in first row changes
@@ -534,7 +561,8 @@ class ExcelTable(QTableWidget):
             # Load cell spans if they exist
             if "spans" in data:
                 for row, col, rs, cs in data["spans"]:
-                    self.setSpan(row, col, rs, cs)
+                    if rs > 1 or cs > 1:
+                        self.setSpan(row, col, rs, cs)
 
         except Exception as e:
             logger.error(f"ERROR LOAD DATA: Failed to load data: {e}")

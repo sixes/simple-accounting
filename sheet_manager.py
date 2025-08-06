@@ -220,9 +220,7 @@ class SheetManager:
                     item = QTableWidgetItem(value)
                     # Make all generated data uneditable for director sheet (and all aggregate sheets)
                     item.setFlags(item.flags() & ~Qt.ItemIsEditable)
-                    # Mark bank data with green background for director sheet
-                    if subject_filter == "董事往来":
-                        item.setData(Qt.BackgroundRole, QColor(200, 255, 200))
+                    item.setData(Qt.BackgroundRole, QColor(200, 255, 200))
                     table.setItem(row_idx, col, item)
                 elif amount_col_start <= col < amount_col_start + amount_col_count:
                     cur = currency_list[col - amount_col_start]
@@ -233,17 +231,13 @@ class SheetManager:
                         logger.info(f"DEBUG: Currency match! cur={cur}, currency={currency}, debit_value='{value}', sheet={sheet.name}, row={row}")
                         item = QTableWidgetItem(value)
                         item.setFlags(item.flags() & ~Qt.ItemIsEditable)
-                        # Mark bank data with green background for director sheet
-                        if subject_filter == "董事往来":
-                            item.setData(Qt.BackgroundRole, QColor(200, 255, 200))
+                        item.setData(Qt.BackgroundRole, QColor(200, 255, 200))
                         table.setItem(row_idx, col, item)
                     else:
                         logger.info(f"DEBUG: Currency mismatch! cur={cur}, currency={currency}")
                         item = QTableWidgetItem("")
                         item.setFlags(item.flags() & ~Qt.ItemIsEditable)
-                        # Mark bank data with green background for director sheet
-                        if subject_filter == "董事往来":
-                            item.setData(Qt.BackgroundRole, QColor(200, 255, 200))
+                        item.setData(Qt.BackgroundRole, QColor(200, 255, 200))
                         table.setItem(row_idx, col, item)
                 else:
                     # Balance and source columns
@@ -253,9 +247,7 @@ class SheetManager:
                         value = ""
                     item = QTableWidgetItem(value)
                     item.setFlags(item.flags() & ~Qt.ItemIsEditable)
-                    # Mark bank data with green background for director sheet
-                    if subject_filter == "董事往来":
-                        item.setData(Qt.BackgroundRole, QColor(200, 255, 200))
+                    item.setData(Qt.BackgroundRole, QColor(200, 255, 200))
                     table.setItem(row_idx, col, item)
             row_idx += 1
 
@@ -287,51 +279,5 @@ class SheetManager:
         self.main_window.sheets.insert(to_index, self.main_window.sheets.pop(from_index))
         self.main_window.auto_save()
 
-    def preserve_director_user_data(self, table):
-        """Preserve user data in director sheet before refresh"""
-        if not hasattr(table, 'user_added_rows') or not table.user_added_rows:
-            return []
-
-        user_data = []
-        for row in table.user_added_rows:
-            if row < table.rowCount():
-                row_data = []
-                has_data = False
-                for col in range(table.columnCount()):
-                    item = table.item(row, col)
-                    text = item.text() if item else ""
-                    row_data.append(text)
-                    if text.strip():
-                        has_data = True
-
-                # Only preserve rows that have actual data
-                if has_data:
-                    user_data.append((row, row_data))
-
-        return user_data
-
-    def restore_director_user_data(self, table, user_data, bank_data_end=0):
-        """Restore user data in director sheet after refresh"""
-        if not user_data:
-            return
-
-        table.user_added_rows = set()
-
-        # Position user data after bank data
-        for i, (original_row, row_data) in enumerate(user_data):
-            new_row = bank_data_end + i
-
-            # Ensure we have enough rows
-            if new_row >= table.rowCount():
-                table.setRowCount(new_row + 50)
-
-            table.user_added_rows.add(new_row)
-
-            # Restore the data - handle both old and new column structures
-            for col, text in enumerate(row_data):
-                if col < table.columnCount() and text:  # Only restore non-empty cells
-                    item = QTableWidgetItem(text)
-                    item.setFlags(Qt.ItemIsEnabled | Qt.ItemIsSelectable | Qt.ItemIsEditable)
-                    table.setItem(new_row, col, item)
 
 
