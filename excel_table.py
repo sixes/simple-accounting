@@ -107,19 +107,44 @@ class ExcelTable(QTableWidget):
             balance = debit_sum - credit_sum
             rate = getattr(self, "exchange_rate", 1.0)
             hkd_balance = balance * rate
+            
+            # Get currency-specific sums for aggregate sheets
+            currency_sums = self.sum_currency_columns()
 
-            # Find column positions
+            # Find column positions - handle both regular and multi-currency sheets
             debit_col = None
             credit_col = None
             balance_col = None
-            for col in range(col_count):
-                header = self.horizontalHeaderItem(col).text().replace(" ", "")
-                if "借方" in header:
-                    debit_col = col
-                if "貸方" in header:
-                    credit_col = col
-                if "餘額" in header:
-                    balance_col = col
+            currency_cols = []
+            
+            # Check if this is a multi-currency aggregate sheet
+            is_aggregate_sheet = (hasattr(self, 'name') and 
+                                 self.name in ["銷售收入", "銷售成本", "銀行費用", "利息收入", "董事往來"])
+            
+            if is_aggregate_sheet and self.rowCount() >= 2:
+                # For aggregate sheets, find currency columns and balance column
+                for col in range(col_count):
+                    # Check row 1 for currency indicators
+                    if col < self.columnCount():
+                        row1_item = self.item(1, col)
+                        if row1_item and "原币(" in row1_item.text():
+                            currency_cols.append(col)
+                        # Find balance column by checking row 0
+                        row0_item = self.item(0, col)
+                        if row0_item and "餘" in row0_item.text():
+                            balance_col = col
+                # For aggregate sheets, treat all currency columns as credit columns
+                credit_col = currency_cols[0] if currency_cols else None
+            else:
+                # Original logic for regular bank sheets
+                for col in range(col_count):
+                    header = self.horizontalHeaderItem(col).text().replace(" ", "")
+                    if "借方" in header:
+                        debit_col = col
+                    if "貸方" in header:
+                        credit_col = col
+                    if "餘額" in header:
+                        balance_col = col
 
             # Draw first pinned row (sheet currency)
             painter.fillRect(0, y1, visible_rect.width(), row_height, QColor(240, 240, 240))
@@ -133,7 +158,11 @@ class ExcelTable(QTableWidget):
                 painter.drawRect(x, y1, w, row_height)
 
                 text = ""
-                if col == debit_col:
+                if is_aggregate_sheet and col in currency_sums:
+                    # For aggregate sheets, show sum for each currency column
+                    currency, column_sum = currency_sums[col]
+                    text = self._format_number(column_sum)
+                elif col == debit_col:
                     text = self._format_number(debit_sum)
                 elif col == credit_col:
                     text = self._format_number(credit_sum)
@@ -150,7 +179,11 @@ class ExcelTable(QTableWidget):
                 painter.drawRect(x, y2, w, row_height)
 
                 text = ""
-                if col == debit_col:
+                if is_aggregate_sheet and col in currency_sums:
+                    # For aggregate sheets, show HKD equivalent for each currency column
+                    currency, column_sum = currency_sums[col]
+                    text = self._format_number(column_sum * rate)
+                elif col == debit_col:
                     text = self._format_number(debit_sum * rate)
                 elif col == credit_col:
                     text = self._format_number(credit_sum * rate)
@@ -261,23 +294,48 @@ class ExcelTable(QTableWidget):
         balance = debit_sum - credit_sum
         rate = getattr(self, "exchange_rate", 1.0)
         hkd_balance = balance * rate
+        
+        # Get currency-specific sums for aggregate sheets
+        currency_sums = self.sum_currency_columns()
+        
+        # Check if this is a multi-currency aggregate sheet
+        is_aggregate_sheet = (hasattr(self, 'name') and 
+                             self.name in ["銷售收入", "銷售成本", "銀行費用", "利息收入", "董事往來"])
+        
         balance_col = None
         debit_col = None
         credit_col = None
-        for col in range(self.columnCount()):
-            header = self.horizontalHeaderItem(col).text().replace(" ", "")
-            if "餘額" in header:
-                balance_col = col
-            if "借方" in header:
-                debit_col = col
-            if "貸方" in header:
-                credit_col = col
+        currency_cols = []
+        
+        if is_aggregate_sheet and self.rowCount() >= 2:
+            # For aggregate sheets, find currency columns and balance column
+            for col in range(self.columnCount()):
+                # Check row 1 for currency indicators
+                row1_item = self.item(1, col)
+                if row1_item and "原币(" in row1_item.text():
+                    currency_cols.append(col)
+                # Find balance column by checking row 0
+                row0_item = self.item(0, col)
+                if row0_item and "餘" in row0_item.text():
+                    balance_col = col
+        else:
+            # Original logic for regular bank sheets
+            for col in range(self.columnCount()):
+                header = self.horizontalHeaderItem(col).text().replace(" ", "")
+                if "餘額" in header:
+                    balance_col = col
+                if "借方" in header:
+                    debit_col = col
+                if "貸方" in header:
+                    credit_col = col
+                    
         last_row = self.rowCount() - 2
         last_row2 = self.rowCount() - 1
         def format_number(value):
             abs_value = abs(value)
             formatted = f"{abs_value:,.2f}" if abs_value >= 1000 else f"{abs_value:.2f}"
             return f"({formatted})" if value < 0 else formatted
+            
         # Sheet currency row
         for col in range(self.columnCount()):
             item = self.item(last_row, col)
@@ -288,7 +346,12 @@ class ExcelTable(QTableWidget):
             if item.flags() & Qt.ItemIsEditable:
                 item.setFlags(item.flags() & ~Qt.ItemIsEditable)
             item.setBackground(QColor(240, 240, 240))
-            if col == debit_col:
+            
+            if is_aggregate_sheet and col in currency_sums:
+                # For aggregate sheets, show sum for each currency column
+                currency, column_sum = currency_sums[col]
+                item.setText(format_number(column_sum))
+            elif col == debit_col:
                 item.setText(format_number(debit_sum))
             elif col == credit_col:
                 item.setText(format_number(credit_sum))
@@ -296,6 +359,7 @@ class ExcelTable(QTableWidget):
                 item.setText(format_number(balance))
             else:
                 item.setText("")
+                
         # HKD row
         for col in range(self.columnCount()):
             item = self.item(last_row2, col)
@@ -305,7 +369,12 @@ class ExcelTable(QTableWidget):
             if item.flags() & Qt.ItemIsEditable:
                 item.setFlags(item.flags() & ~Qt.ItemIsEditable)
             item.setBackground(QColor(220, 220, 220))
-            if col == debit_col:
+            
+            if is_aggregate_sheet and col in currency_sums:
+                # For aggregate sheets, show HKD equivalent for each currency column
+                currency, column_sum = currency_sums[col]
+                item.setText(format_number(column_sum * rate))
+            elif col == debit_col:
                 item.setText(format_number(debit_sum * rate))
             elif col == credit_col:
                 item.setText(format_number(credit_sum * rate))
@@ -620,30 +689,90 @@ class ExcelTable(QTableWidget):
         debit_col = None
         credit_col = None
 
-        for col in range(self.columnCount()):
-            header = self.horizontalHeaderItem(col).text().replace(" ", "")
-            if "借方" in header:
-                debit_col = col
-            if "貸方" in header:
-                credit_col = col
-        # Calculate totals (exclude last two pinned rows)
-        for row in range(self.rowCount() - 2):
-            if credit_col is not None:
-                credit_item = self.item(row, credit_col)
-                try:
-                    credit_text = credit_item.text().replace(',', '') if credit_item and credit_item.text() else '0'
-                    credit_sum += float(credit_text) if credit_text else 0.0
-                except Exception:
-                    pass
-            if debit_col is not None:
-                debit_item = self.item(row, debit_col)
-                try:
-                    debit_text = debit_item.text().replace(',', '') if debit_item and debit_item.text() else '0'
-                    debit_sum += float(debit_text) if debit_text else 0.0
-                except Exception:
-                    pass
+        # Check if this is a multi-currency aggregate sheet by looking at the data structure
+        is_aggregate_sheet = (hasattr(self, 'name') and 
+                             self.name in ["銷售收入", "銷售成本", "銀行費用", "利息收入", "董事往來"])
+        
+        if is_aggregate_sheet and self.rowCount() >= 2:
+            # For aggregate sheets, sum all currency columns
+            for col in range(self.columnCount()):
+                # Check row 1 for currency indicators
+                row1_item = self.item(1, col)
+                if row1_item and "原币(" in row1_item.text():
+                    # Sum this currency column (starting from row 2 to exclude headers)
+                    for row in range(2, self.rowCount() - 2):  # Exclude last two pinned rows
+                        item = self.item(row, col)
+                        if item and item.text():
+                            try:
+                                value_text = item.text().replace(',', '')
+                                value = float(value_text) if value_text else 0.0
+                                # For aggregate sheets, all currency columns represent credit amounts
+                                credit_sum += value
+                            except Exception:
+                                pass
+        else:
+            # Original logic for regular bank sheets
+            for col in range(self.columnCount()):
+                header = self.horizontalHeaderItem(col).text().replace(" ", "")
+                if "借方" in header:
+                    debit_col = col
+                if "貸方" in header:
+                    credit_col = col
+                    
+            # Calculate totals (exclude last two pinned rows)
+            for row in range(self.rowCount() - 2):
+                if credit_col is not None:
+                    credit_item = self.item(row, credit_col)
+                    try:
+                        credit_text = credit_item.text().replace(',', '') if credit_item and credit_item.text() else '0'
+                        credit_sum += float(credit_text) if credit_text else 0.0
+                    except Exception:
+                        pass
+                if debit_col is not None:
+                    debit_item = self.item(row, debit_col)
+                    try:
+                        debit_text = debit_item.text().replace(',', '') if debit_item and debit_item.text() else '0'
+                        debit_sum += float(debit_text) if debit_text else 0.0
+                    except Exception:
+                        pass
 
         return debit_sum, credit_sum
+
+    def sum_currency_columns(self):
+        """Get sum for each currency column in aggregate sheets"""
+        currency_sums = {}
+        
+        if not (hasattr(self, 'name') and 
+                self.name in ["銷售收入", "銷售成本", "銀行費用", "利息收入", "董事往來"]):
+            return currency_sums
+            
+        if self.rowCount() < 2:
+            return currency_sums
+        
+        # Find currency columns and their currencies
+        for col in range(self.columnCount()):
+            row1_item = self.item(1, col)
+            if row1_item and "原币(" in row1_item.text():
+                # Extract currency from text like "原币(USD)"
+                currency = row1_item.text().split("(")[1].split(")")[0]
+                column_sum = 0.0
+                
+                # Sum this currency column (starting from row 2 to exclude headers)
+                # For aggregate sheets, exclude the last two pinned rows if they exist
+                end_row = max(2, self.rowCount() - 2) if self.rowCount() > 4 else self.rowCount()
+                for row in range(2, end_row):
+                    item = self.item(row, col)
+                    if item and item.text():
+                        try:
+                            value_text = item.text().replace(',', '').strip()
+                            value = float(value_text) if value_text else 0.0
+                            column_sum += value
+                        except Exception as e:
+                            pass
+                            
+                currency_sums[col] = (currency, round(column_sum, 2))
+                
+        return currency_sums
 
     def _auto_save(self, *_):
         if self.auto_save_callback:
