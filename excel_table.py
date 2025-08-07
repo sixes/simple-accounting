@@ -246,7 +246,7 @@ class ExcelTable(QTableWidget):
                 painter.drawRect(0, y2, merge_width, row_height)
                 
                 # Draw the merged cell text
-                text = "本期TOTAL:HKD"
+                text = "本期 TOTAL: HKD"
                 painter.drawText(6, y2 + row_height//2 + 5, text)
                 
                 # Start drawing individual cells from column 3
@@ -331,7 +331,6 @@ class ExcelTable(QTableWidget):
         """Enforce scroll limits to prevent scrolling into pinned area"""
         scrollbar = self.verticalScrollBar()
         current_scroll = scrollbar.value()
-        
         # For aggregate sheets, we need to account for frozen rows at the top
         if hasattr(self, '_frozen_row_count') and self._frozen_row_count > 0:
             # Calculate actual data rows (total - frozen headers - pinned summary)
@@ -994,6 +993,8 @@ class ExcelTable(QTableWidget):
                             self.user_added_rows.add(r)
 
                     self.setItem(r, c, new_item)
+        self.viewport().update()
+
 
     def merge_cells(self):
         sel = self.selectedRanges()

@@ -221,10 +221,8 @@ class ExcelLike(QMainWindow):
 
         if is_bank or ("-" in name):
             sheet = self.sheet_manager.create_bank_sheet(name)
-            sheet.type = "bank"
         else:
             sheet = self.sheet_manager.create_regular_sheet(name)
-            sheet.type = "regular"
 
     def add_sheet_dialog(self):
         """Show dialog to add a new sheet"""
@@ -445,7 +443,7 @@ class ExcelLike(QMainWindow):
         if index == self.tabs.count() - 1 and self.tabs.tabText(index) == "+":
             prev_index = getattr(self, '_prev_tab_index', None)
             if prev_index is None:
-                prev_index = max(0, index - 1)
+                prev_index = 0
             if self.tabs.count() > 1:
                 self.tabs.setCurrentIndex(prev_index)
             dlg = AddSheetDialog(self)
@@ -475,33 +473,22 @@ class ExcelLike(QMainWindow):
                         new_sheet = self.sheet_manager.create_bank_sheet(tab_name, currency)
                     except TypeError:
                         new_sheet = self.sheet_manager.create_bank_sheet(tab_name)
-                    new_sheet.type = "bank"
-                    if currency:
-                        new_sheet.currency = currency
                 elif sheet_type == "銷售收入":
                     new_sheet = self.sheet_manager.create_sales_sheet()
-                    new_sheet.type = "aggregate"
                 elif sheet_type == "銷售成本":
                     new_sheet = self.sheet_manager.create_cost_sheet()
-                    new_sheet.type = "aggregate"
                 elif sheet_type == "銀行費用":
                     new_sheet = self.sheet_manager.create_bank_fee_sheet()
-                    new_sheet.type = "aggregate"
                 elif sheet_type == "利息收入":
                     new_sheet = self.sheet_manager.create_interest_sheet()
-                    new_sheet.type = "aggregate"
                 elif sheet_type == "應付費用":
                     new_sheet = self.sheet_manager.create_payable_sheet()
-                    new_sheet.type = "aggregate"
                 elif sheet_type == "董事往來":
                     new_sheet = self.sheet_manager.create_director_sheet()
-                    new_sheet.type = "aggregate"
                 elif sheet_type == "工資":
                     new_sheet = self.sheet_manager.create_salary_sheet()
-                    new_sheet.type = "aggregate"
                 else:
                     new_sheet = self.sheet_manager.create_regular_sheet(tab_name)
-                    new_sheet.type = "regular"
                 plus_index = self.tabs.count() - 1
                 if self.tabs.tabText(plus_index) == "+":
                     self.tabs.removeTab(plus_index)

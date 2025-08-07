@@ -131,17 +131,10 @@ class SheetManager:
             merged_ranges.append((credit_col_start, credit_col_start + credit_col_count - 1))
         
         # Use 2-row headers for aggregate sheets
-        if table.type == "aggregate":
-            table.setup_two_row_headers(main_headers, sub_headers, merged_ranges)
-            # Start data from row 0 instead of row 2
-            if table.rowCount() < 1:
-                table.setRowCount(1)
-        else:
-            # Fallback for non-aggregate sheets (shouldn't happen in this context)
-            table.setColumnCount(len(main_headers))
-            table.setHorizontalHeaderLabels(main_headers)
-            if table.rowCount() < 2:
-                table.setRowCount(2)
+        table.setup_two_row_headers(main_headers, sub_headers, merged_ranges)
+        # Start data from row 0 instead of row 2
+        if table.rowCount() < 1:
+            table.setRowCount(1)
 
         return currency_list, credit_col_start, credit_col_count
 
@@ -281,6 +274,3 @@ class SheetManager:
         """Handle tab reordering to keep sheets list in sync"""
         self.main_window.sheets.insert(to_index, self.main_window.sheets.pop(from_index))
         self.main_window.auto_save()
-
-
-
