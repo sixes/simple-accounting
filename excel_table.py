@@ -792,8 +792,17 @@ class ExcelTable(QTableWidget):
                     font = painter.font()
                     font.setBold(True)
                     painter.setFont(font)
+                    
+                    # Center text within the merged cell area
+                    text_x = x + merge_width // 2
                     text_y = row_y + merge_height // 2 + 5
-                    painter.drawText(x + 6, text_y, text)
+                    
+                    # Use centered alignment for merged cells
+                    if row_span > 1 or col_span > 1:
+                        painter.drawText(x, row_y, merge_width, merge_height, Qt.AlignCenter, text)
+                    else:
+                        # For single cells, use left alignment with padding
+                        painter.drawText(x + 6, text_y, text)
 
                 # Mark the top-left cell of the span as painted
                 painted_cells.add((row, col))
