@@ -25,7 +25,7 @@ jobs:
         
     - name: Build with PyInstaller
       run: |
-        pyinstaller --onefile --windowed --name=bankNote --add-data="*.py;." main.py
+        pyinstaller bankNote.spec
         
     - name: Upload artifact
       uses: actions/upload-artifact@v4

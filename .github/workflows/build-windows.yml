@@ -28,7 +28,7 @@ jobs:
         
     - name: Build with Nuitka
       run: |
-        python -m nuitka --standalone --enable-plugin=pyside6 --windows-disable-console --msvc=latest --output-filename=bankNote.exe main.py
+        python -m nuitka --standalone --enable-plugin=pyside6 --windows-console-mode=disable --msvc=latest --output-filename=bankNote.exe --assume-yes-for-downloads main.py
         
     - name: Upload artifact
       uses: actions/upload-artifact@v4
