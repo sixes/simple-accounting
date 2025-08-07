@@ -1,0 +1,37 @@
+name: Build Windows Executable
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+        
+    - name: Install Visual Studio Build Tools
+      uses: microsoft/setup-msbuild@v1.3.1
+      
+    - name: Install dependencies
+      run: |
+        pip install PySide6
+        pip install nuitka
+        
+    - name: Build with Nuitka
+      run: |
+        python -m nuitka --standalone --enable-plugin=pyside6 --windows-disable-console --msvc=latest --output-filename=bankNote.exe main.py
+        
+    - name: Upload artifact
+      uses: actions/upload-artifact@v3
+      with:
+        name: bankNote-windows
+        path: main.dist/
