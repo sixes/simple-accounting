@@ -25,10 +25,11 @@ jobs:
       run: |
         pip install PySide6
         pip install nuitka
+        pip install zstandard
         
     - name: Build with Nuitka
       run: |
-        python -m nuitka --standalone --enable-plugin=pyside6 --windows-console-mode=disable --msvc=latest --output-filename=bankNote.exe --assume-yes-for-downloads main.py
+        python -m nuitka --standalone --enable-plugin=pyside6 --windows-console-mode=disable --output-filename=bankNote.exe --assume-yes-for-downloads main.py
         
     - name: Upload artifact
       uses: actions/upload-artifact@v4

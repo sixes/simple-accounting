@@ -25,7 +25,7 @@ jobs:
         
     - name: Build with PyInstaller
       run: |
-        pyinstaller bankNote.spec
+        pyinstaller --onefile --windowed --name=bankNote --hidden-import=excel_like --hidden-import=excel_table --hidden-import=sheet_manager --hidden-import=file_manager --hidden-import=dialogs main.py
         
     - name: Upload artifact
       uses: actions/upload-artifact@v4
