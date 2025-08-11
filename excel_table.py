@@ -1,16 +1,10 @@
-import pickle
 import logging
-from PySide6.QtWidgets import (
-    QTableWidget, QTableWidgetItem, QMenu, QApplication
-)
-from PySide6.QtGui import QColor
-from PySide6.QtCore import Qt
-from PySide6.QtGui import QAction, QKeySequence
-from PySide6.QtGui import QPainter, QFont
+from PySide6.QtCore import Qt, QTimer
+from PySide6.QtGui import QAction, QColor, QKeySequence, QPainter
+from PySide6.QtWidgets import QApplication, QMenu, QTableWidget, QTableWidgetItem
 
 
 logger = logging.getLogger(__name__)
-
 
 def excel_column_name(n):
     name = ""
@@ -24,9 +18,7 @@ class ExcelTable(QTableWidget):
         super().__init__(rows, cols)
         self.setContextMenuPolicy(Qt.CustomContextMenu)
         self.customContextMenuRequested.connect(self.context_menu)
-        self.copied_range = None
         self.name = name
-        assert type != None
         self.type = type
         self.currency = name.split("-")[1] if "-" in self.name else ""
         self.auto_save_callback = auto_save_callback
@@ -54,7 +46,6 @@ class ExcelTable(QTableWidget):
         self.horizontalHeader().setDefaultSectionSize(80)
         self.setSizeAdjustPolicy(QTableWidget.AdjustToContents)
         self.itemChanged.connect(self._on_item_changed)
-        self.cellChanged.connect(self._on_cell_changed)
         self.user_added_rows = set()  # Track user-added rows
         self._last_paint_pos = -1
         # Enable smooth scrolling and proper updates
@@ -66,39 +57,10 @@ class ExcelTable(QTableWidget):
         self.horizontalScrollBar().valueChanged.connect(self._on_scroll)
         
         # Set up a timer to constantly enforce scroll limits
-        from PySide6.QtCore import QTimer
-        self._scroll_limit_timer = QTimer()
-        self._scroll_limit_timer.timeout.connect(self._enforce_scroll_limits)
-        self._scroll_limit_timer.start(100)  # Check every 100ms (reduced frequency for less spam)
-        if False:
-            self.setStyleSheet("""
-                QTableWidget {
-                    background: #ffffff;
-                    gridline-color: #e0e0e0;
-                    selection-background-color: #cce2ff;
-                    selection-color: #000;
-                    font-size: 14px;
-                }
-                QHeaderView::section {
-                    background: #e9ecef;
-                    color: #222;
-                    border: 1px solid #e0e0e0;
-                    font-weight: bold;
-                    font-size: 15px;
-                    padding: 4px;
-                }
-                QTableWidget::item {
-                    border: 0.5px solid #e0e0e0;
-                    font-size: 14px;
-                    background: #ffffff;
-                    color: #000;
-                }
-                QTableWidget::item:selected {
-                    border: 1.5px solid #0078d4;
-                    background: #cce2ff;
-                    color: #000;
-                }
-            """)
+#        self._scroll_limit_timer = QTimer()
+#        self._scroll_limit_timer.timeout.connect(self._enforce_scroll_limits)
+#        self._scroll_limit_timer.start(100)  # Check every 100ms (reduced frequency for less spam)
+
 
     def paintEvent(self, event):
         # First call the parent paintEvent to draw the table contents
@@ -383,14 +345,6 @@ class ExcelTable(QTableWidget):
         # If current scroll exceeds the limit, force it back
         if current_scroll > max_scroll:
             scrollbar.setValue(max_scroll)
-
-    def _on_cell_changed(self, row, column):
-        """Track user edits by adding row to user_added_rows"""
-        if row not in self.user_added_rows:
-            item = self.item(row, column)
-            if item and (item.flags() & Qt.ItemIsEditable):
-                self.user_added_rows.add(row)
-                #print(f"add user data:{row}")
 
     def _on_item_changed(self, item):
         # Only recalculate if debit, credit, or balance in first row changes
@@ -792,17 +746,8 @@ class ExcelTable(QTableWidget):
                     font = painter.font()
                     font.setBold(True)
                     painter.setFont(font)
-                    
-                    # Center text within the merged cell area
-                    text_x = x + merge_width // 2
                     text_y = row_y + merge_height // 2 + 5
-                    
-                    # Use centered alignment for merged cells
-                    if row_span > 1 or col_span > 1:
-                        painter.drawText(x, row_y, merge_width, merge_height, Qt.AlignCenter, text)
-                    else:
-                        # For single cells, use left alignment with padding
-                        painter.drawText(x + 6, text_y, text)
+                    painter.drawText(x + 6, text_y, text)
 
                 # Mark the top-left cell of the span as painted
                 painted_cells.add((row, col))
@@ -868,16 +813,17 @@ class ExcelTable(QTableWidget):
         del_col = QAction("Delete Column", self)
         copy = QAction("Copy", self)
         paste = QAction("Paste", self)
+        clear_content = QAction("Clear Content", self) 
         merge = QAction("Merge Cells", self)
         split = QAction("Unmerge Cells", self)
 
-        # For aggregate sheets, disable editing operations
         if is_aggregate_sheet:
             add_row.setEnabled(False)
             add_col.setEnabled(False)
             del_row.setEnabled(False)
             del_col.setEnabled(False)
             paste.setEnabled(False)
+            clear_content.setEnabled(False)
             merge.setEnabled(False)
             split.setEnabled(False)
 
@@ -888,6 +834,7 @@ class ExcelTable(QTableWidget):
         menu.addSeparator()
         menu.addAction(copy)
         menu.addAction(paste)
+        menu.addAction(clear_content)
         menu.addSeparator()
         menu.addAction(merge)
         menu.addAction(split)
@@ -916,6 +863,7 @@ class ExcelTable(QTableWidget):
         del_col.triggered.connect(lambda: self.removeColumn(self.currentColumn()))
         copy.triggered.connect(self.copy_cells)
         paste.triggered.connect(self.paste_cells)
+        clear_content.triggered.connect(self.clear_cell_contents)
         merge.triggered.connect(self.merge_cells)
         split.triggered.connect(self.unmerge_cells)
         rename_sheet.triggered.connect(self.rename_sheet)
@@ -935,73 +883,188 @@ class ExcelTable(QTableWidget):
 
         menu.exec(self.viewport().mapToGlobal(pos))
 
+    def clear_cell_contents(self):
+        """Clear content from selected cells while preserving formatting"""
+        selected_indexes = self.selectedIndexes()
+        
+        if not selected_indexes:
+            return
+            
+        for index in selected_indexes:
+            if index.isValid():
+                row, col = index.row(), index.column()
+                item = self.item(row, col)
+                
+                if item and item.flags() & Qt.ItemIsEditable:
+                    item.setText("")
+
     def rename_sheet(self):
         """Rename the current sheet"""
-        from PySide6.QtWidgets import QInputDialog
-        new_name, ok = QInputDialog.getText(
-            self,
-            "Rename Sheet",
-            "Enter new sheet name:",
-            text=self.name
-        )
-        if ok and new_name and new_name != self.name:
-            old_name = self.name
-            self.name = new_name
-            if "-" in new_name:
-                self.currency = new_name.split("-")[1]
+        from PySide6.QtWidgets import (QInputDialog, QMessageBox, QDialog, 
+                                    QVBoxLayout, QFormLayout, QLineEdit, 
+                                    QComboBox, QDialogButtonBox)
+
+        if self.type == "bank":
+            # Custom dialog for bank sheets
+            dialog = QDialog(self)
+            dialog.setWindowTitle("Rename Bank Sheet")
+            layout = QVBoxLayout(dialog)
+
+            # Pre-fill bank name by removing current currency suffix
+            current_bank_name = self.name
+            if self.currency and self.name.endswith('-' + self.currency):
+                current_bank_name = self.name[:-len(self.currency)-1]
+
+            # Widget setup
+            bank_name_edit = QLineEdit(current_bank_name)
+            currency_combo = QComboBox()
+
+            # Common currencies list
+            common_currencies = ['USD', 'CAD', 'EUR', 'GBP', 'JPY', 'CNY', 
+                                'AUD', 'CHF', 'HKD', 'SGD', 'INR', 'MXN']
+            currency_combo.addItems(common_currencies)
+            
+            # Select current currency or add if missing
+            if self.currency:
+                index = currency_combo.findText(self.currency)
+                if index >= 0:
+                    currency_combo.setCurrentIndex(index)
+                else:
+                    currency_combo.addItem(self.currency)
+                    currency_combo.setCurrentIndex(currency_combo.count() - 1)
             else:
-                self.currency = ""
+                currency_combo.setCurrentIndex(0)
 
-            # Update tab name if parent has update_tab_name method
-            if hasattr(self.window(), 'update_tab_name'):
-                self.window().update_tab_name(old_name, new_name)
+            # Form layout
+            form_layout = QFormLayout()
+            form_layout.addRow("Bank Name:", bank_name_edit)
+            form_layout.addRow("Currency:", currency_combo)
+            layout.addLayout(form_layout)
 
-            # Force save and refresh
-            self._auto_save()
-            self.viewport().update()
+            # Dialog buttons
+            button_box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+            button_box.accepted.connect(dialog.accept)
+            button_box.rejected.connect(dialog.reject)
+            layout.addWidget(button_box)
+
+            # Show dialog and process input
+            if dialog.exec() != QDialog.Accepted:
+                return
+            
+            new_bank_name = bank_name_edit.text().strip()
+            if not new_bank_name:
+                QMessageBox.critical(
+                    self,
+                    "Invalid Name",
+                    "Bank name cannot be empty.",
+                    QMessageBox.Ok
+                )
+                return
+            
+            new_currency = currency_combo.currentText().strip()
+            new_name = f"{new_bank_name}-{new_currency}"
+        
+        else:
+            # Standard input for non-bank sheets
+            new_name, ok = QInputDialog.getText(
+                self,
+                "Rename Sheet",
+                "Enter new sheet name:",
+                text=self.name
+            )
+            if not ok or not new_name or new_name == self.name:
+                return
+
+        # Exit if name unchanged (prevents unnecessary updates)
+        if new_name == self.name:
+            return
+
+        # Update name and currency
+        old_name = self.name
+        self.name = new_name
+        
+        if self.type == "bank":
+            self.currency = new_currency  # Set from combo box
+        else:
+            self.currency = ""  # Clear currency for non-bank
+
+        # Update UI and save
+        if hasattr(self.window(), 'update_tab_name'):
+            self.window().update_tab_name(old_name, new_name)
+        
+        self._auto_save()
+        self.viewport().update()
 
     def copy_cells(self):
         sel = self.selectedRanges()
-        if sel:
-            r = sel[0]
-            self.copied_range = [
-                [self.item(r.topRow() + i, r.leftColumn() + j).text() if self.item(r.topRow() + i, r.leftColumn() + j) else ""
-                 for j in range(r.columnCount())]
-                for i in range(r.rowCount())
-            ]
+        if not sel:
+            return
+        r = sel[0]
+        # Build 2D list of cell contents
+        rows = []
+        for i in range(r.rowCount()):
+            row = []
+            for j in range(r.columnCount()):
+                item = self.item(r.topRow() + i, r.leftColumn() + j)
+                row.append(item.text() if item else "")
+            rows.append(row)
+        
+        clipboard_text = "\n".join("\t".join(row) for row in rows)
+        QApplication.clipboard().setText(clipboard_text)
 
     def paste_cells(self):
         clipboard = QApplication.clipboard()
         text = clipboard.text()
         if not text:
             return
+            
+        # Split clipboard text into rows
         rows = text.split('\n')
-        start_row = self.currentRow()
-        start_col = self.currentColumn()
+        
+        # Remove any trailing empty rows
+        if rows and not rows[-1].strip():
+            rows = rows[:-1]
+            
+        # Determine paste start position based on selection
+        selected_ranges = self.selectedRanges()
+        if selected_ranges:
+            # Use top-left of first selected range
+            sel_range = selected_ranges[0]
+            start_row = sel_range.topRow()
+            start_col = sel_range.leftColumn()
+        else:
+            # No selection - use current cell
+            start_row = self.currentRow()
+            start_col = self.currentColumn()
+            
+        max_row = self.rowCount()   # Entire table boundaries
+        max_col = self.columnCount()
+        
+        # Paste clipboard content starting at (start_row, start_col)
         for i, row_data in enumerate(rows):
-            if not row_data.strip():
-                continue
+            r = start_row + i
+            # Stop if we exceed table row boundary
+            if r >= max_row:
+                break
+                
             columns = row_data.split('\t')
-            for j, val in enumerate(columns):
-                r = start_row + i
+            for j, content in enumerate(columns):
                 c = start_col + j
+                # Stop if we exceed table column boundary
+                if c >= max_col:
+                    break
+                    
+                # Only paste within table limits
                 if r < self.rowCount() and c < self.columnCount():
-                    # For director sheet, check if target cell is bank data
-                    if hasattr(self, 'name') and self.name == "董事往來":
-                        item = self.item(r, c)
-                        # Skip this cell if it's bank data (has green background)
-                        if item and item.data(Qt.BackgroundRole):
-                            continue
-
-                    # Create new item or get existing
-                    new_item = QTableWidgetItem(val)
-
-                    # If it's user data in director sheet, mark the row
-                    if hasattr(self, 'name') and self.name == "董事往來":
-                        if r > 1:  # Skip header rows
-                            self.user_added_rows.add(r)
-
-                    self.setItem(r, c, new_item)
+                    item = self.item(r, c)
+                    if item is None:
+                        # Create new item if none exists
+                        new_item = QTableWidgetItem(content)
+                        self.setItem(r, c, new_item)
+                    elif item.flags() & Qt.ItemIsEditable:
+                        # Update existing editable item
+                        item.setText(content)
+                        
         self.viewport().update()
 
 
@@ -1090,17 +1153,15 @@ class ExcelTable(QTableWidget):
                 return  # Ignore delete key for aggregate sheets
                 
             for item in self.selectedItems():
-                # For director sheet, also check for background color (bank data)
-                if hasattr(self, 'name') and self.name == "董事往來":
-                    if item.flags() & Qt.ItemIsEditable and not item.data(Qt.BackgroundRole):
-                        item.setText("")
-                else:
-                    if item.flags() & Qt.ItemIsEditable:
-                        item.setText("")
+                if item.flags() & Qt.ItemIsEditable:
+                    item.setText("")
             if self.auto_save_callback:
                 self.auto_save_callback()
             return
-            
+        
+        if event.matches(QKeySequence.Copy):
+            self.copy_cells()  # Call copy function
+            return
         # Handle Ctrl+V for paste - disabled for aggregate sheets
         if event.matches(QKeySequence.Paste):
             if is_aggregate_sheet:

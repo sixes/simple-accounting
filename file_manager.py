@@ -60,16 +60,12 @@ class FileManager:
                 ]:
                     sheet_data = {"cells": {}, "spans": []}
 
-                # Save user_added_rows if it exists
-                user_added_data = None
-
                 sheet_info = {
                     "name": tab_name,
                     "type": tab.type,
                     "data": sheet_data,
                     "exchange_rate": exchange_rate,
                     "currency": tab.currency,
-                    "user_added_rows": user_added_data
                 }
                 #print(f"saving sheet: {sheet_data}")
                 data["sheets"].append(sheet_info)

@@ -47,16 +47,7 @@ class ExcelLike(QMainWindow):
         self.sales_sheet = None
         self.cost_sheet = None
         self.user_added_rows = None
-        """
-        self.sheet_manager.create_bank_sheet("HSBC-USD")
-        self.sales_sheet = self.sheet_manager.create_sales_sheet()
-        self.cost_sheet = self.sheet_manager.create_cost_sheet()
-        self.sheet_manager.create_bank_fee_sheet()
-        self.sheet_manager.create_interest_sheet()
-        self.sheet_manager.create_payable_sheet()
-        self.sheet_manager.create_director_sheet()
-        """
-        # Always add '+' tab at the end (even if no other tabs)
+
         self._add_plus_tab()
         self.tabs.currentChanged.connect(self._on_tab_or_plus_clicked)
 
@@ -271,7 +262,7 @@ class ExcelLike(QMainWindow):
                 new_sheet = self.sheet_manager.create_payable_sheet()
             elif sheet_type == "董事往來":
                 new_sheet = self.sheet_manager.create_director_sheet()
-            elif sheet_type == "工資":
+            elif sheet_type == "資":
                 new_sheet = self.sheet_manager.create_salary_sheet()
             else:
                 print(f"DEBUG ADD: Creating regular sheet: {tab_name}")
