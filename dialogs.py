@@ -13,6 +13,7 @@ class AddSheetDialog(QDialog):
 
         self.type_group = QButtonGroup(self)
         self.bank_radio = QRadioButton("Bank")
+        self.non_bank_radio = QRadioButton("Non-Bank")
         self.sales_radio = QRadioButton("銷售收入")
         self.cost_radio = QRadioButton("銷售成本")
         self.bank_fee_radio = QRadioButton("銀行費用")
@@ -21,6 +22,7 @@ class AddSheetDialog(QDialog):
         self.director_radio = QRadioButton("董事往來")
         self.salary_radio = QRadioButton("工資")
         self.type_group.addButton(self.bank_radio)
+        self.type_group.addButton(self.non_bank_radio)
         self.type_group.addButton(self.sales_radio)
         self.type_group.addButton(self.cost_radio)
         self.type_group.addButton(self.bank_fee_radio)
@@ -29,6 +31,7 @@ class AddSheetDialog(QDialog):
         self.type_group.addButton(self.director_radio)
         self.type_group.addButton(self.salary_radio)
         layout.addWidget(self.bank_radio)
+        layout.addWidget(self.non_bank_radio)
         layout.addWidget(self.sales_radio)
         layout.addWidget(self.cost_radio)
         layout.addWidget(self.bank_fee_radio)
@@ -45,6 +48,7 @@ class AddSheetDialog(QDialog):
         layout.addWidget(self.currency_combo)
         self.currency_combo.setEnabled(False)
         self.bank_radio.toggled.connect(self._on_type_changed)
+        self.non_bank_radio.toggled.connect(self._on_type_changed)
         self.sales_radio.toggled.connect(self._on_type_changed)
         self.cost_radio.toggled.connect(self._on_type_changed)
         self.bank_fee_radio.toggled.connect(self._on_type_changed)
@@ -82,6 +86,8 @@ class AddSheetDialog(QDialog):
                 self.name_input.setText("董事往來")
             elif self.salary_radio.isChecked():
                 self.name_input.setText("工資")
+            elif self.non_bank_radio.isChecked():
+                self.name_input.setText("非银行交易")
             self.name_input.setReadOnly(True)
             self.currency_combo.setEnabled(False)
 
@@ -103,6 +109,8 @@ class AddSheetDialog(QDialog):
         name = self.name_input.text().strip()
         if self.bank_radio.isChecked():
             return (name, "bank", self.currency_combo.currentText())
+        elif self.non_bank_radio.isChecked():
+            return (name, "非银行交易")
         elif self.sales_radio.isChecked():
             return (name, "銷售收入")
         elif self.cost_radio.isChecked():
@@ -117,4 +125,4 @@ class AddSheetDialog(QDialog):
             return (name, "董事往來")
         elif self.salary_radio.isChecked():
             return (name, "工資")
-
+        

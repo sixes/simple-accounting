@@ -1,7 +1,7 @@
 from PySide6.QtWidgets import (
     QMainWindow, QTabWidget, QLineEdit, QLabel, QHBoxLayout, QVBoxLayout,
     QWidget, QInputDialog, QDateEdit, QDialog, QMenu, QMessageBox, QDoubleSpinBox,
-    QToolButton, QTabBar, QApplication
+    QToolButton, QTabBar, QApplication, QPushButton
 )
 from PySide6.QtGui import QAction, QPalette
 from PySide6.QtCore import Qt, QDate, qInstallMessageHandler
@@ -55,6 +55,7 @@ class ExcelLike(QMainWindow):
         self.company_input.editingFinished.connect(self.auto_save)
         self.period_from_input.dateChanged.connect(self.auto_save)
         self.period_to_input.dateChanged.connect(self.auto_save)
+        self.update_button.clicked.connect(self.on_update_clicked)  # Connect to a handler method
 
         # Connect tab signals
         self.tabs.tabCloseRequested.connect(self.close_tab)
@@ -73,6 +74,9 @@ class ExcelLike(QMainWindow):
             print("DEBUG UI: No company name loaded, keeping default")
         # Always ensure the plus tab is present after all startup logic
         self._add_plus_tab()
+
+    def on_update_clicked(self):
+        pass
 
     def setup_top_bar(self):
         """Setup the top bar with company name, exchange rate, and period inputs"""
@@ -105,6 +109,8 @@ class ExcelLike(QMainWindow):
         self.period_to_input.setDisplayFormat("yyyy/MM/dd")
         self.period_to_input.setCalendarPopup(True)
 
+        self.update_button = QPushButton("Update")
+
         self.top_bar.addWidget(self.company_label)
         self.top_bar.addWidget(self.company_input)
         self.top_bar.addWidget(self.exchange_rate_label)
@@ -113,6 +119,7 @@ class ExcelLike(QMainWindow):
         self.top_bar.addWidget(self.period_from_input)
         self.top_bar.addWidget(self.period_to_label)
         self.top_bar.addWidget(self.period_to_input)
+        self.top_bar.addWidget(self.update_button)  # Add the button
         self.top_bar.addStretch()
         self.layout.addLayout(self.top_bar)
 
@@ -264,6 +271,8 @@ class ExcelLike(QMainWindow):
                 new_sheet = self.sheet_manager.create_director_sheet()
             elif sheet_type == "資":
                 new_sheet = self.sheet_manager.create_salary_sheet()
+            elif sheet_type == "非银行交易":
+                new_sheet = self.sheet_manager.create_non_bank_sheet()
             else:
                 print(f"DEBUG ADD: Creating regular sheet: {tab_name}")
                 new_sheet = self.sheet_manager.create_regular_sheet(tab_name)
@@ -379,6 +388,7 @@ class ExcelLike(QMainWindow):
         self.period_from_input.setDate(QDate.currentDate().addMonths(-1))
         self.period_to_input.setDate(QDate.currentDate())
         self.sheet_manager.create_bank_sheet("HSBC-USD")
+        self.sheet_manager.create_non_bank_sheet()
         self.sales_sheet = self.sheet_manager.create_sales_sheet()
         self.cost_sheet = self.sheet_manager.create_cost_sheet()
         self.sheet_manager.create_bank_fee_sheet()
@@ -478,6 +488,8 @@ class ExcelLike(QMainWindow):
                     new_sheet = self.sheet_manager.create_director_sheet()
                 elif sheet_type == "工資":
                     new_sheet = self.sheet_manager.create_salary_sheet()
+                elif sheet_type == "非银行交易":
+                    new_sheet = self.sheet_manager.create_non_bank_sheet(tab_name)
                 else:
                     new_sheet = self.sheet_manager.create_regular_sheet(tab_name)
                 plus_index = self.tabs.count() - 1

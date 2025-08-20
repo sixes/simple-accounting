@@ -35,6 +35,17 @@ class SheetManager:
         self.main_window.sheets.append(table)
         return table
 
+    def create_non_bank_sheet(self, name):
+        """Create a regular sheet"""
+        columns = ["序 號", "日  期", "對方科目", "子科目", "摘   要", "借方(USD)", "借方(EUR)", "借方(JPY)", "借方(GBP)", "借方(CHF)", "借方(CAD)", "借方(AUD)", "借方(CNY)", "借方(HKD)", "借方(NZD)", "贷方(USD)", "贷方(EUR)", "贷方(JPY)", "贷方(GBP)", "贷方(CHF)", "贷方(CAD)", "贷方(AUD)", "贷方(CNY)", "贷方(HKD)", "贷方(NZD)", "备注"]
+        table = ExcelTable(auto_save_callback=self.main_window.auto_save, name=name, type="non_bank")
+        table.setColumnCount(len(columns))
+        table.setHorizontalHeaderLabels(columns)
+
+        self.main_window.tabs.addTab(table, name)
+        self.main_window.sheets.append(table)
+        return table
+    
     def create_regular_sheet(self, name):
         """Create a regular sheet"""
         columns = ["序 號", "日  期", "對方科目", "摘   要", "借     方", "貸     方", "借或貸", "餘    額", "發票號碼"]
@@ -52,7 +63,7 @@ class SheetManager:
         table = ExcelTable(auto_save_callback=self.main_window.auto_save, name=sheet_name, type="aggregate")
         table.setColumnCount(len(columns))
         table.setHorizontalHeaderLabels(columns)
-        #table.setRowCount(2)  # Just header rows, data will resize it
+        table.setRowCount(2)  # Just header rows, data will resize it
         self.main_window.tabs.addTab(table, sheet_name)
         self.main_window.sheets.append(table)
         return table
@@ -95,8 +106,7 @@ class SheetManager:
 
     def create_salary_sheet(self):
         """Create a salary sheet"""
-        #return self.create_aggregate_sheet("工資", "工資", "借     方")
-        return self.create_regular_sheet("工資")
+        return self.create_aggregate_sheet("工資", "工資", "借     方")
 
     def _setup_currency_sheet_structure(self, table, amount_column_title):
         """Common method to set up sales sheet structure with multi-currency columns"""

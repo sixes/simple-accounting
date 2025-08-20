@@ -149,6 +149,14 @@ class FileManager:
                         if row < table.rowCount() and col < table.columnCount():
                             item = QTableWidgetItem(cell_value)
                             table.setItem(row, col, item)
+                elif sheet_type == "non_bank":
+                    table = self.main_window.sheet_manager.create_non_bank_sheet(sheet_name)
+                    for cell_key, cell_value in sheet_info["data"]["cells"].items():
+                        row = cell_key[0]
+                        col = cell_key[1]
+                        if row < table.rowCount() and col < table.columnCount():
+                            item = QTableWidgetItem(cell_value)
+                            table.setItem(row, col, item)
                 elif sheet_type == "aggregate":
                     if sheet_name == "銷售收入":
                         table = self.main_window.sheet_manager.create_sales_sheet()
