@@ -13,7 +13,7 @@ class SheetManager:
 
     def create_bank_sheet(self, name, currency=None):
         """Create a bank sheet with exchange rate control"""
-        columns = ["序 號", "日  期", "對方科目", "摘   要", "借     方", "貸     方", "餘    額", "發票號碼"]
+        columns = ["序 號", "日  期", "對方科目", "子科目", "借     方", "貸     方", "餘    額", "發票號碼", "摘   要"]
         table = ExcelTable(auto_save_callback=self.main_window.auto_save, name=name, type="bank")
         table.setColumnCount(len(columns))
         table.setHorizontalHeaderLabels(columns)
@@ -36,19 +36,32 @@ class SheetManager:
         return table
 
     def create_non_bank_sheet(self, name):
-        """Create a regular sheet"""
-        columns = ["序 號", "日  期", "對方科目", "子科目", "摘   要", "借方(USD)", "借方(EUR)", "借方(JPY)", "借方(GBP)", "借方(CHF)", "借方(CAD)", "借方(AUD)", "借方(CNY)", "借方(HKD)", "借方(NZD)", "贷方(USD)", "贷方(EUR)", "贷方(JPY)", "贷方(GBP)", "贷方(CHF)", "贷方(CAD)", "贷方(AUD)", "贷方(CNY)", "贷方(HKD)", "贷方(NZD)", "备注"]
+        """Create a non-bank sheet with exactly the same header structure as the payable sheet"""
+        main_headers = [
+            "序 號", "日  期", "對方科目", "子科目", "發票號碼",
+            "借方","借方","借方","借方","借方","借方",
+            "貸方", "貸方", "貸方", "貸方", "貸方","貸方",
+            "餘額", "摘  要", "來源"
+        ]
+        sub_headers = [
+            "", "", "", "", "",
+            "原币(USD)", "原币(CNY)", "原币(EUR)", "原币(HKD)", "原币(JPY)", "原币(GBP)",
+            "原币(USD)", "原币(CNY)", "原币(EUR)", "原币(HKD)", "原币(JPY)", "原币(GBP)",
+            "", ""
+        ]
         table = ExcelTable(auto_save_callback=self.main_window.auto_save, name=name, type="non_bank")
-        table.setColumnCount(len(columns))
-        table.setHorizontalHeaderLabels(columns)
-
+        table.setColumnCount(len(main_headers))
+        table.setup_two_row_headers(main_headers, sub_headers, merged_ranges=[
+            (5, 10), (11, 16)
+        ])
+        table.setRowCount(50)
         self.main_window.tabs.addTab(table, name)
         self.main_window.sheets.append(table)
         return table
     
     def create_regular_sheet(self, name):
         """Create a regular sheet"""
-        columns = ["序 號", "日  期", "對方科目", "摘   要", "借     方", "貸     方", "借或貸", "餘    額", "發票號碼"]
+        columns = ["序 號", "日  期", "對方科目", "子科目", "借     方", "貸     方", "借或貸", "餘    額", "發票號碼", "摘   要"]
         table = ExcelTable(auto_save_callback=self.main_window.auto_save, name=name, type="regular")
         table.setColumnCount(len(columns))
         table.setHorizontalHeaderLabels(columns)
@@ -107,6 +120,30 @@ class SheetManager:
     def create_salary_sheet(self):
         """Create a salary sheet"""
         return self.create_aggregate_sheet("工資", "工資", "借     方")
+
+    def create_payable_detail_sheet(self, sheet_name):
+        """Create a payable sheet with exactly the same header structure as the sales sheet"""
+        # Use the same main and sub headers, merged ranges, and formatting as sales sheet
+        main_headers = [
+            "序 號", "日  期", "對方科目", "子科目", "發票號碼",
+            "借方","借方","借方","借方","借方","借方",
+            "貸方", "貸方", "貸方", "貸方", "貸方","貸方",
+            "餘額", "摘  要", "來源"
+        ]
+        sub_headers = [
+            "", "", "", "", "",
+            "原币(USD)", "原币(CNY)", "原币(EUR)", "原币(HKD)", "原币(JPY)", "原币(GBP)",
+            "原币(USD)", "原币(CNY)", "原币(EUR)", "原币(HKD)", "原币(JPY)", "原币(GBP)",
+            "", ""
+        ]
+        table = ExcelTable("payable_detail", auto_save_callback=self.main_window.auto_save, name=sheet_name)
+        table.setColumnCount(len(main_headers))
+        table.setup_two_row_headers(main_headers, sub_headers, merged_ranges=[
+            (5, 10), (11, 16) # Merge 貸方 across 5 currency columns
+        ])
+        table.setRowCount(50)
+        self.main_window.sheets.append(table)
+        return table
 
     def _setup_currency_sheet_structure(self, table, amount_column_title):
         """Common method to set up sales sheet structure with multi-currency columns"""

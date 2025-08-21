@@ -172,6 +172,8 @@ class FileManager:
                         table = self.main_window.sheet_manager.create_director_sheet()
                     else:
                         logger.error(f"create unknown {sheet_type} sheet")
+                elif sheet_type == "payable_detail":
+                    table = self.main_window.sheet_manager.create_payable_detail_sheet(sheet_name)
                 else:
                     table = self.main_window.sheet_manager.create_regular_sheet(sheet_name)
 

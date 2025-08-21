@@ -74,8 +74,8 @@ class ExcelTable(QTableWidget):
             col_count = self.columnCount()
 
             # Paint frozen rows if they exist (for aggregate sheets with 2-row headers)
-            if hasattr(self, '_frozen_row_count') and self._frozen_row_count > 0:
-                self._paint_frozen_rows(painter, visible_rect)
+            # if hasattr(self, '_frozen_row_count') and self._frozen_row_count > 0:
+            #     self._paint_frozen_rows(painter, visible_rect)
 
             # Always paint pinned rows at the absolute bottom of the viewport
             # The viewport margins ensure these don't overlap with scrollable content
@@ -583,11 +583,13 @@ class ExcelTable(QTableWidget):
                     item.setFlags(item.flags() & ~Qt.ItemIsEditable)
 
     def setup_two_row_headers(self, main_headers, sub_headers, merged_ranges=None):
-        """Set up 2-row horizontal headers for aggregate sheets"""
-        if self.type != "aggregate":
+        """Set up 2-row horizontal headers for aggregate sheets and payable detail sheets"""
+        if self.type not in ["aggregate", "payable_detail", "non_bank"]:
+            print(f"DEBUG SETUP: Skipping header setup for type '{self.type}'")
             return
             
         print(f"DEBUG SETUP: Setting up headers for {len(main_headers)} columns")
+        print(f"DEBUG SETUP: Sheet type: '{self.type}'")
         
         # CRITICAL: Clear all existing spans first to avoid conflicts
         for row in range(min(10, self.rowCount())):  # Clear spans in first 10 rows  
@@ -604,17 +606,22 @@ class ExcelTable(QTableWidget):
         if self.rowCount() < 2:
             self.setRowCount(2)
         
+        # Set main headers in row 0
         for col, header in enumerate(main_headers):
             item = QTableWidgetItem(header)
             item.setFlags(item.flags() & ~Qt.ItemIsEditable)
             item.setBackground(QColor(220, 220, 220))
             self.setItem(0, col, item)
+            print(f"DEBUG SETUP: Set main header col {col}: '{header}'")
         
+        # Set sub headers in row 1
         for col, sub_header in enumerate(sub_headers):
             item = QTableWidgetItem(sub_header if sub_header else "")
             item.setFlags(item.flags() & ~Qt.ItemIsEditable)
             item.setBackground(QColor(240, 240, 240))
             self.setItem(1, col, item)
+            if sub_header:
+                print(f"DEBUG SETUP: Set sub header col {col}: '{sub_header}'")
         
         # Identify currency columns to decide which columns to merge vertically
         currency_columns = {i for i, h in enumerate(sub_headers) if h and "原币(" in h}
@@ -659,100 +666,95 @@ class ExcelTable(QTableWidget):
         if not hasattr(self, '_frozen_row_count') or self._frozen_row_count <= 0:
             return
             
-        # 1. Count currencies from parent window tabs for debug purposes
-        parent_window = self.window()
-        currencies = []
-        if hasattr(parent_window, 'tabs'):
-            tabs = parent_window.tabs
-            for i in range(tabs.count()):
-                tab_text = tabs.tabText(i)
-                if "-" in tab_text and tab_text != "+":
-                    try:
-                        currencies.append(tab_text.split('-')[-1])
-                    except IndexError:
-                        pass # Should not happen with the check
-        print(f"DEBUG: Found {len(currencies)} bank sheets with currencies: {currencies}")
-
-        # 2. Identify currency columns from sub-headers
-        currency_columns = []
-        if hasattr(self, '_sub_headers'):
-            for col, sub_header in enumerate(self._sub_headers):
-                if sub_header and "原币(" in sub_header:
-                    currency_columns.append(col)
-        print(f"DEBUG: Currency columns found: {currency_columns}")
-
-        row_height = self.rowHeight(0)
-        frozen_height = row_height * self._frozen_row_count
-        
-        margin_rect = self.contentsMargins()
-        frozen_y_start = -margin_rect.top()
-        
-        # Clear the frozen area
-        painter.fillRect(0, frozen_y_start, visible_rect.width(), frozen_height, QColor(255, 255, 255))
-        
-        painted_cells = set() # Track top-left cell of already painted spans
-
-        for row in range(self._frozen_row_count):
-            # Calculate fixed Y position for frozen rows (they don't scroll)
-            row_y = frozen_y_start + (row * row_height)
+        # Prevent infinite loop - add guard for recursive painting
+        if hasattr(self, '_painting_frozen_rows') and self._painting_frozen_rows:
+            return
             
-            for col in range(self.columnCount()):
-                if self.isColumnHidden(col) or (row, col) in painted_cells:
-                    continue
+        self._painting_frozen_rows = True
+        
+        try:
+            # Don't debug output every paint event to prevent spam and infinite loops
+            
+            # 2. Identify currency columns from sub-headers
+            currency_columns = []
+            if hasattr(self, '_sub_headers'):
+                for col, sub_header in enumerate(self._sub_headers):
+                    if sub_header and "原币(" in sub_header:
+                        currency_columns.append(col)
 
-                x = self.columnViewportPosition(col)
-                w = self.columnWidth(col)
-                
-                if x + w < 0 or x > visible_rect.width():
-                    continue
-                
-                row_span = self.rowSpan(row, col)
-                col_span = self.columnSpan(row, col)
+            row_height = self.rowHeight(0)
+            frozen_height = row_height * self._frozen_row_count
+            
+            margin_rect = self.contentsMargins()
+            frozen_y_start = -margin_rect.top()
+            
+            # Clear the frozen area
+            painter.fillRect(0, frozen_y_start, visible_rect.width(), frozen_height, QColor(255, 255, 255))
+            
+            painted_cells = set() # Track top-left cell of already painted spans
 
-                # Simple span detection - if current cell is not top-left of its span, skip
-                # Check if we're the top-left cell of a span by looking at the span values
-                if row_span > 1 or col_span > 1:
-                    # This is a merged cell, check if it's the top-left
-                    is_top_left = True
-                    for check_row in range(max(0, row - row_span + 1), row + 1):
-                        for check_col in range(max(0, col - col_span + 1), col + 1):
-                            if (check_row, check_col) != (row, col):
-                                if self.rowSpan(check_row, check_col) == row_span and self.columnSpan(check_row, check_col) == col_span:
-                                    is_top_left = False
-                                    break
-                        if not is_top_left:
-                            break
-                    
-                    if not is_top_left:
+            for row in range(self._frozen_row_count):
+                # Calculate fixed Y position for frozen rows (they don't scroll)
+                row_y = frozen_y_start + (row * row_height)
+                
+                for col in range(self.columnCount()):
+                    if self.isColumnHidden(col) or (row, col) in painted_cells:
                         continue
 
-                current_item = self.item(row, col)
-                if not current_item:
-                    continue
+                    x = self.columnViewportPosition(col)
+                    w = self.columnWidth(col)
+                    
+                    if x + w < 0 or x > visible_rect.width():
+                        continue
+                    
+                    row_span = self.rowSpan(row, col)
+                    col_span = self.columnSpan(row, col)
 
-                merge_width = sum(self.columnWidth(col + i) for i in range(col_span))
-                merge_height = row_height * row_span
+                    # Simple span detection - if current cell is not top-left of its span, skip
+                    # Check if we're the top-left cell of a span by looking at the span values
+                    if row_span > 1 or col_span > 1:
+                        # This is a merged cell, check if it's the top-left
+                        is_top_left = True
+                        for check_row in range(max(0, row - row_span + 1), row + 1):
+                            for check_col in range(max(0, col - col_span + 1), col + 1):
+                                if (check_row, check_col) != (row, col):
+                                    if self.rowSpan(check_row, check_col) == row_span and self.columnSpan(check_row, check_col) == col_span:
+                                        is_top_left = False
+                                        break
+                            if not is_top_left:
+                                break
+                        
+                        if not is_top_left:
+                            continue
 
-                # Determine background color from the row
-                bg_color = QColor(220, 220, 220) if row == 0 else QColor(240, 240, 240)
-                
-                painter.fillRect(x, row_y, merge_width, merge_height, bg_color)
-                painter.setPen(QColor(80, 80, 80))
-                painter.drawRect(x, row_y, merge_width, merge_height)
+                    current_item = self.item(row, col)
+                    if not current_item:
+                        continue
 
-                text = current_item.text()
-                if text:
-                    painter.setPen(QColor(40, 40, 40))
-                    font = painter.font()
-                    font.setBold(True)
-                    painter.setFont(font)
-                    text_y = row_y + merge_height // 2 + 5
-                    painter.drawText(x + 6, text_y, text)
+                    merge_width = sum(self.columnWidth(col + i) for i in range(col_span))
+                    merge_height = row_height * row_span
 
-                # Mark the top-left cell of the span as painted
-                painted_cells.add((row, col))
-                if row_span > 1 or col_span > 1:
-                    print(f"DEBUG: Painted merged cell at ({row},{col}) with span ({row_span},{col_span})")
+                    # Determine background color from the row
+                    bg_color = QColor(220, 220, 220) if row == 0 else QColor(240, 240, 240)
+                    
+                    painter.fillRect(x, row_y, merge_width, merge_height, bg_color)
+                    painter.setPen(QColor(80, 80, 80))
+                    painter.drawRect(x, row_y, merge_width, merge_height)
+
+                    text = current_item.text()
+                    if text:
+                        painter.setPen(QColor(40, 40, 40))
+                        font = painter.font()
+                        font.setBold(True)
+                        painter.setFont(font)
+                        text_y = row_y + merge_height // 2 + 5
+                        painter.drawText(x + 6, text_y, text)
+
+                    # Mark the top-left cell of the span as painted
+                    painted_cells.add((row, col))
+                    
+        finally:
+            self._painting_frozen_rows = False
 
     def update_headers(self):
         if self.type == "aggregate":
@@ -1222,7 +1224,13 @@ class ExcelTable(QTableWidget):
         else:
             # Original logic for regular bank sheets
             for col in range(self.columnCount()):
-                header = self.horizontalHeaderItem(col).text().replace(" ", "")
+                header_item = self.horizontalHeaderItem(col)
+                if header_item is not None:
+                    header = header_item.text().replace(" ", "")
+                else:
+                    # Fallback to header row item (row 0)
+                    item = self.item(0, col)
+                    header = item.text().replace(" ", "") if item and item.text() else ""
                 if "借方" in header:
                     debit_col = col
                 if "貸方" in header:
