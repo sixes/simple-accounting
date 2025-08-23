@@ -2,6 +2,7 @@ import logging
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QAction, QColor, QKeySequence, QPainter
 from PySide6.QtWidgets import QApplication, QMenu, QTableWidget, QTableWidgetItem
+from utils import format_number
 
 
 logger = logging.getLogger(__name__)
@@ -233,13 +234,8 @@ class ExcelTable(QTableWidget):
 
     @staticmethod
     def format_number(value):
-        """Format a number with commas, 2 decimals, and parentheses for negatives."""
-        try:
-            abs_value = abs(value)
-            formatted = f"{abs_value:,.2f}" if abs_value >= 1000 else f"{abs_value:.2f}"
-            return f"({formatted})" if value < 0 else formatted
-        except Exception:
-            return str(value)
+        """Deprecated: Use format_number from utils.py instead."""
+        return format_number(value)
 
     @staticmethod
     def parse_number(text):

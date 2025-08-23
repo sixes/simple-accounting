@@ -8,6 +8,7 @@ from PySide6.QtCore import Qt, QDate, qInstallMessageHandler
 from dialogs import AddSheetDialog
 from sheet_manager import SheetManager
 from file_manager import FileManager
+from utils import format_number
 import platform
 import time
 
@@ -83,7 +84,147 @@ class ExcelLike(QMainWindow):
         bank_data = []
         non_bank_data = []
         non_bank_header = None
-        # Find all sheets and collect data
+        # --- 汇兑损益逻辑 begin ---
+        currency_exchange_rows = []  # (sheet, row, row_dict, headers)
+        summary_errors = []
+        summary_keys = set()
+        summary_map = {}  # 摘要: [row_info, ...]
+        sheet_name_map = {getattr(s, 'name', None): s for s in self.sheets if getattr(s, 'type', None) == 'bank'}
+        for i, sheet in enumerate(self.sheets):
+            if getattr(sheet, 'type', None) == 'bank':
+                headers = [sheet.horizontalHeaderItem(j).text() for j in range(sheet.columnCount())]
+                idx_duifang = headers.index("对方科目") if "对方科目" in headers else -1
+                idx_zike = headers.index("子科目") if "子科目" in headers else -1
+                idx_debit = headers.index("借方") if "借方" in headers else -1
+                idx_credit = headers.index("贷方") if "贷方" in headers else -1
+                idx_zhaiyao = headers.index("摘要") if "摘要" in headers else -1
+                for row in range(sheet.rowCount()):
+                    zike = sheet.item(row, idx_zike).text() if idx_zike >= 0 and sheet.item(row, idx_zike) else ""
+                    if zike == "中转":
+                        duifang = sheet.item(row, idx_duifang).text() if idx_duifang >= 0 and sheet.item(row, idx_duifang) else ""
+                        zhaiyao = sheet.item(row, idx_zhaiyao).text() if idx_zhaiyao >= 0 and sheet.item(row, idx_zhaiyao) else ""
+                        if not duifang or duifang == sheet.name or duifang not in sheet_name_map:
+                            summary_errors.append(f"汇总[{sheet.name}] row {row+1}: 对方科目无效或为自身")
+                        if not zhaiyao:
+                            summary_errors.append(f"汇总[{sheet.name}] row {row+1}: 摘要为空")
+                        # Instead of checking 摘要重复 here, just add to summary_map and summary_keys
+                        # The uniqueness and pair check will be done after collecting all rows
+                        summary_keys.add(zhaiyao)
+                        row_dict = {h: sheet.item(row, c).text() if sheet.item(row, c) else "" for c, h in enumerate(headers)}
+                        info = dict(sheet=sheet, row=row, row_dict=row_dict, headers=headers, duifang=duifang, zhaiyao=zhaiyao)
+                        summary_map.setdefault(zhaiyao, []).append(info)
+                        currency_exchange_rows.append((sheet, row, row_dict, headers))
+        # 2. Check each 摘要 maps to 2 rows (one debit, one credit)
+        for zhaiyao, rows in summary_map.items():
+            if not zhaiyao:
+                continue
+            if len(rows) != 2:
+                sheet_info = "; ".join([f"表: {r['sheet'].name}, 行: {r['row']+1}" for r in rows])
+                summary_errors.append(f"汇兑摘要 {zhaiyao} 未配对 (共{len(rows)}行) [{sheet_info}]")
+            else:
+                debit_row = None
+                credit_row = None
+                for info in rows:
+                    sheet = info['sheet']
+                    idx_debit = info['headers'].index("借方") if "借方" in info['headers'] else -1
+                    idx_credit = info['headers'].index("贷方") if "贷方" in info['headers'] else -1
+                    debit_val = float(info['row_dict'].get("借方", "0") or 0)
+                    credit_val = float(info['row_dict'].get("贷方", "0") or 0)
+                    if debit_val != 0:
+                        if debit_row is not None:
+                            summary_errors.append(f"汇总摘要 {zhaiyao} 有多个借方 (表: {debit_row['sheet'].name}, 行: {debit_row['row']+1}; 表: {info['sheet'].name}, 行: {info['row']+1})")
+                        debit_row = info
+                    if credit_val != 0:
+                        if credit_row is not None:
+                            summary_errors.append(f"汇总摘要 {zhaiyao} 有多个贷方 (表: {credit_row['sheet'].name}, 行: {credit_row['row']+1}; 表: {info['sheet'].name}, 行: {info['row']+1})")
+                        credit_row = info
+                if not debit_row or not credit_row:
+                    sheet_names = []
+                    row_numbers = []
+                    for r in rows:
+                        sheet_names.append(r['sheet'].name)
+                        row_numbers.append(str(r['row']+1))
+                    summary_errors.append(f"汇总摘要 {zhaiyao} 借贷方未配对 (表: {','.join(sheet_names)}, 行: {','.join(row_numbers)})")
+        # 3. If errors, show and abort
+        if summary_errors:
+            QMessageBox.critical(self, "汇兑损益数据错误", "\n".join(summary_errors))
+            return
+        # 4. 汇兑损益 sheet generation
+        if summary_map:
+            detail_name = "汇兑损益"
+            # Find or create 汇兑损益 sheet
+            detail_sheet = None
+            for s in self.sheets:
+                if getattr(s, 'name', None) == detail_name:
+                    detail_sheet = s
+                    break
+            if not detail_sheet:
+                detail_sheet = self.sheet_manager.create_payable_detail_sheet(detail_name)
+                self.sheets.append(detail_sheet)
+                self.tabs.addTab(detail_sheet, detail_name)
+            # Prepare headers
+            headers = [detail_sheet.horizontalHeaderItem(j).text() for j in range(detail_sheet.columnCount())]
+            idx_date = headers.index("日期") if "日期" in headers else -1
+            idx_duifang = headers.index("对方科目") if "对方科目" in headers else -1
+            idx_debit_hkd = -1
+            for j, h in enumerate(headers):
+                if h.startswith("借方") and "HKD" in h:
+                    idx_debit_hkd = j
+                    break
+            idx_zhaiyao = headers.index("摘要") if "摘要" in headers else -1
+            detail_sheet.clearContents()
+            row_idx = 0
+            for zhaiyao, rows in summary_map.items():
+                if not zhaiyao or len(rows) != 2:
+                    continue
+                debit_info, credit_info = None, None
+                for info in rows:
+                    sheet = info['sheet']
+                    idx_debit = info['headers'].index("借方") if "借方" in info['headers'] else -1
+                    idx_credit = info['headers'].index("贷方") if "贷方" in info['headers'] else -1
+                    debit_val = float(info['row_dict'].get("借方", "0") or 0)
+                    credit_val = float(info['row_dict'].get("贷方", "0") or 0)
+                    if debit_val != 0:
+                        debit_info = info
+                    if credit_val != 0:
+                        credit_info = info
+                if not debit_info or not credit_info:
+                    continue
+                # Get date, currencies, and rates
+                date_val = debit_info['row_dict'].get("日期", "")
+                from_sheet = debit_info['sheet']
+                to_sheet = credit_info['sheet']
+                from_currency = getattr(from_sheet, 'currency', '')
+                to_currency = getattr(to_sheet, 'currency', '')
+                from_rate = getattr(from_sheet, 'exchange_rate', 1.0)
+                to_rate = getattr(to_sheet, 'exchange_rate', 1.0)
+                debit_val = float(debit_info['row_dict'].get("借方", "0") or 0)
+                credit_val = float(credit_info['row_dict'].get("贷方", "0") or 0)
+                # 汇兑损益 = debit * from_rate - credit * to_rate
+                new_value = debit_val * from_rate - credit_val * to_rate
+                # Fill row
+                if idx_date >= 0:
+                    detail_sheet.setItem(row_idx, idx_date, QTableWidgetItem(date_val))
+                if idx_duifang >= 0:
+                    detail_sheet.setItem(row_idx, idx_duifang, QTableWidgetItem("银行存款"))
+                # Use format_figure for value formatting
+                if idx_debit_hkd >= 0:
+                    formatted_value = format_number(new_value)
+                    detail_sheet.setItem(row_idx, idx_debit_hkd, QTableWidgetItem(formatted_value))
+                if idx_zhaiyao >= 0:
+                    # Add more detail: row numbers and amounts from both sheets
+                    from_row_num = debit_info['row'] + 1 if debit_info else ''
+                    to_row_num = credit_info['row'] + 1 if credit_info else ''
+                    from_amt = debit_val
+                    to_amt = credit_val
+                    from_sheet_name = getattr(from_sheet, 'name', '')
+                    to_sheet_name = getattr(to_sheet, 'name', '')
+                    zhaiyao_detail = f"{from_currency}和{to_currency}互转 ({from_sheet_name}:{from_row_num}:{from_amt:.2f}→{to_sheet_name}:{to_row_num}:{to_amt:.2f})"
+                    detail_sheet.setItem(row_idx, idx_zhaiyao, QTableWidgetItem(zhaiyao_detail))
+                row_idx += 1
+        # 5. Remove these rows from bank_data
+        remove_keys = set(summary_map.keys())
+        # ...existing code for collecting bank_data and non_bank_data, but skip rows with 摘要 in remove_keys for bank_data...
         for i, sheet in enumerate(self.sheets):
             if getattr(sheet, 'type', None) == 'bank':
                 headers = [sheet.horizontalHeaderItem(j).text() for j in range(sheet.columnCount())]
@@ -92,6 +233,7 @@ class ExcelLike(QMainWindow):
                 idx_debit = headers.index("借方") if "借方" in headers else -1
                 idx_credit = headers.index("贷方") if "贷方" in headers else -1
                 idx_balance = headers.index("余额") if "余额" in headers else -1
+                idx_zhaiyao = headers.index("摘要") if "摘要" in headers else -1
                 for row in range(sheet.rowCount()):
                     key = None
                     if idx_duifang >= 0 and idx_zike >= 0:
@@ -110,7 +252,8 @@ class ExcelLike(QMainWindow):
                         credit_val = float(credit_text) if credit_text else 0
                     except ValueError:
                         credit_val = 0
-                    if (debit_val != 0 or credit_val != 0) and key:
+                    # Only add if not a 汇兑损益 (中转) row
+                    if (debit_val != 0 or credit_val != 0) and key and (sheet.item(row, idx_zhaiyao).text() if idx_zhaiyao >= 0 and sheet.item(row, idx_zhaiyao) else "") not in remove_keys:
                         row_dict = {}
                         for c, h in enumerate(headers):
                             if c == idx_balance:
