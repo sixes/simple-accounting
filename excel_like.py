@@ -23,8 +23,10 @@ class ExcelLike(QMainWindow):
         self.setWindowTitle("bankNote")
 
         # Force light theme for better readability
-        if platform.system() != "Windows":
-            self.set_light_theme()
+        if platform.system() == "Darwin":
+            from datetime import datetime
+            if datetime.now().hour >= 19:
+                self.set_light_theme()
 
         self.central = QWidget()
         self.setCentralWidget(self.central)
@@ -97,8 +99,16 @@ class ExcelLike(QMainWindow):
                         key = duifang
                         if zike != "":
                             key = duifang + "-" + zike
-                    debit_val = float(sheet.item(row, idx_debit).text().replace(",", "")) if idx_debit >= 0 and sheet.item(row, idx_debit) and sheet.item(row, idx_debit).text() else 0
-                    credit_val = float(sheet.item(row, idx_credit).text().replace(",", "")) if idx_credit >= 0 and sheet.item(row, idx_credit) and sheet.item(row, idx_credit).text() else 0
+                    debit_text = sheet.item(row, idx_debit).text().strip().replace(",", "") if idx_debit >= 0 and sheet.item(row, idx_debit) and sheet.item(row, idx_debit).text() else ""
+                    credit_text = sheet.item(row, idx_credit).text().strip().replace(",", "") if idx_credit >= 0 and sheet.item(row, idx_credit) and sheet.item(row, idx_credit).text() else ""
+                    try:
+                        debit_val = float(debit_text) if debit_text else 0
+                    except ValueError:
+                        debit_val = 0
+                    try:
+                        credit_val = float(credit_text) if credit_text else 0
+                    except ValueError:
+                        credit_val = 0
                     if (debit_val != 0 or credit_val != 0) and key:
                         row_dict = {}
                         for c, h in enumerate(headers):
@@ -138,7 +148,7 @@ class ExcelLike(QMainWindow):
                         if zike != "":
                             key = jiefang + "-" + zike
                     for col, h in currency_cols:
-                        val = sheet.item(row, col).text() if sheet.item(row, col) else ""
+                        val = sheet.item(row, col).text().strip() if sheet.item(row, col) else ""
                         try:
                             fval = float(val.replace(",", "")) if val else 0
                         except Exception:
@@ -177,6 +187,12 @@ class ExcelLike(QMainWindow):
                 else:
                     QMessageBox.warning(self, "Error", "No non-bank sheet found to create payable detail sheet header.")
                     continue
+            else:
+                # Erase all existing data in the payable detail sheet before writing new data
+                #payable_sheet.setRowCount(300)  # or any default row count you want
+                for row in range(payable_sheet.rowCount()):
+                    for col in range(payable_sheet.columnCount()):
+                        payable_sheet.setItem(row, col, QTableWidgetItem(""))
             headers = [payable_sheet.horizontalHeaderItem(j).text() for j in range(payable_sheet.columnCount())]
             mapping = {"debit": {}, "credit": {}}
             for idx, h in enumerate(headers):
@@ -201,10 +217,13 @@ class ExcelLike(QMainWindow):
             # Sort by date string (assume format yyyy/MM/dd or similar, fallback to string sort)
             def date_key(x):
                 from datetime import datetime
-                try:
-                    return datetime.strptime(x[0], "%Y/%m/%d")
-                except Exception:
-                    return x[0]
+                for fmt in ("%Y/%m/%d", "%m/%d/%y", "%Y-%m-%d", "%m-%d-%y"):
+                    try:
+                        return datetime.strptime(x[0], fmt)
+                    except Exception:
+                        continue
+                # If all parsing fails, return a very old date so it sorts first
+                return datetime(1900, 1, 1)
             all_rows.sort(key=date_key)
             # Set row count to at least 300
             payable_sheet.setRowCount(max(100, len(all_rows) + 10))
@@ -242,6 +261,7 @@ class ExcelLike(QMainWindow):
                     if source_col_idx is not None:
                         payable_sheet.setItem(row_idx, source_col_idx, QTableWidgetItem(f"{item.get('sheet_name', '')}:{item.get('row_number', '')}"))
                 row_idx += 1
+        self._add_plus_tab()
 
     def setup_top_bar(self):
         """Setup the top bar with company name, exchange rate, and period inputs"""
@@ -492,6 +512,10 @@ class ExcelLike(QMainWindow):
         self.period_from_input.setDate(QDate.currentDate().addMonths(-1))
         self.period_to_input.setDate(QDate.currentDate())
         self.sheet_manager.create_bank_sheet("HSBC-USD")
+        self.sheet_manager.create_bank_sheet("HSBC-RMB")
+        self.sheet_manager.create_bank_sheet("HSBC-EUR")
+        self.sheet_manager.create_bank_sheet("HSBC-JPY")
+        self.sheet_manager.create_bank_sheet("HSBC-GBP")
         self.sheet_manager.create_non_bank_sheet()
         # Always add '+' tab at the end (even if no other tabs)
         self._add_plus_tab()

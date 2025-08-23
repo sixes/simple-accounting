@@ -13,7 +13,7 @@ class SheetManager:
 
     def create_bank_sheet(self, name, currency=None):
         """Create a bank sheet with exchange rate control"""
-        columns = ["序号", "日期", "对方科目", "子科目", "借方", "贷方", "余额", "发票号码"]
+        columns = ["序号", "日期", "对方科目", "子科目", "借方", "贷方", "余额", "发票号码", "摘要"]
         table = ExcelTable(auto_save_callback=self.main_window.auto_save, name=name, type="bank")
         table.setColumnCount(len(columns))
         table.setHorizontalHeaderLabels(columns)
