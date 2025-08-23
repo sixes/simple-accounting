@@ -100,7 +100,6 @@ class ExcelLike(QMainWindow):
                     debit_val = float(sheet.item(row, idx_debit).text().replace(",", "")) if idx_debit >= 0 and sheet.item(row, idx_debit) and sheet.item(row, idx_debit).text() else 0
                     credit_val = float(sheet.item(row, idx_credit).text().replace(",", "")) if idx_credit >= 0 and sheet.item(row, idx_credit) and sheet.item(row, idx_credit).text() else 0
                     if (debit_val != 0 or credit_val != 0) and key:
-                        # Build a dict of header:value for this row, skip balance column
                         row_dict = {}
                         for c, h in enumerate(headers):
                             if c == idx_balance:
@@ -112,7 +111,9 @@ class ExcelLike(QMainWindow):
                             "currency": getattr(sheet, "currency", ""),
                             "debit": debit_val,
                             "credit": credit_val,
-                            "key": key
+                            "key": key,
+                            "sheet_name": getattr(sheet, "name", ""),
+                            "row_number": row + 1
                         })
             elif getattr(sheet, 'type', None) == 'non_bank':
                 if not non_bank_header:
@@ -143,12 +144,10 @@ class ExcelLike(QMainWindow):
                         except Exception:
                             fval = 0
                         if fval != 0 and key:
-                            # Parse currency from header
                             if "(" in h and ")" in h:
                                 currency = h.split("(")[1].split(")")[0]
                             else:
                                 currency = ""
-                            # Build a dict of header:value for this row
                             row_dict = {}
                             for c, hh in enumerate(headers):
                                 row_dict[hh] = sheet.item(row, c).text() if sheet.item(row, c) else ""
@@ -157,7 +156,9 @@ class ExcelLike(QMainWindow):
                                 "currency": currency,
                                 "col": col,
                                 "value": fval,
-                                "key": key
+                                "key": key,
+                                "sheet_name": getattr(sheet, "name", ""),
+                                "row_number": row + 1
                             })
         # 2. For each key, create a payable detail sheet if not exists
         all_data = bank_data + non_bank_data
@@ -206,11 +207,18 @@ class ExcelLike(QMainWindow):
                     return x[0]
             all_rows.sort(key=date_key)
             # Set row count to at least 300
-            payable_sheet.setRowCount(max(300, len(all_rows) + 10))
+            payable_sheet.setRowCount(max(100, len(all_rows) + 10))
             row_idx = 0
             for date_val, typ, item in all_rows:
                 row_dict = item["row_dict"]
                 currency = item["currency"]
+                # Find source column index
+                source_col_idx = None
+                for idx, h in enumerate(headers):
+                    if h == "来源":
+                        source_col_idx = idx
+                        break
+                # Write data
                 if typ == 'bank':
                     for h, v in row_dict.items():
                         if h in headers and not ("余额" in h):
@@ -220,6 +228,9 @@ class ExcelLike(QMainWindow):
                         payable_sheet.setItem(row_idx, mapping["debit"][currency], QTableWidgetItem(str(item["debit"])))
                     elif item["credit"] != 0 and currency in mapping["credit"]:
                         payable_sheet.setItem(row_idx, mapping["credit"][currency], QTableWidgetItem(str(item["credit"])))
+                    # Set source column
+                    if source_col_idx is not None:
+                        payable_sheet.setItem(row_idx, source_col_idx, QTableWidgetItem(f"{item.get('sheet_name', '')}:{item.get('row_number', '')}"))
                 else:
                     for h, v in row_dict.items():
                         if h in headers and not ("余额" in h or "借方(" in h or "贷方(" in h):
@@ -227,6 +238,9 @@ class ExcelLike(QMainWindow):
                             payable_sheet.setItem(row_idx, col_idx, QTableWidgetItem(v))
                     if currency in mapping["debit"]:
                         payable_sheet.setItem(row_idx, mapping["debit"][currency], QTableWidgetItem(str(item["value"])))
+                    # Set source column
+                    if source_col_idx is not None:
+                        payable_sheet.setItem(row_idx, source_col_idx, QTableWidgetItem(f"{item.get('sheet_name', '')}:{item.get('row_number', '')}"))
                 row_idx += 1
 
     def setup_top_bar(self):
@@ -294,6 +308,11 @@ class ExcelLike(QMainWindow):
                 if hasattr(sheet, 'exchange_rate_input'):
                     sheet.exchange_rate_input.setVisible(False)
             current_tab = self.tabs.widget(index)
+            # Avoid AttributeError for the plus tab (QWidget)
+            if not hasattr(current_tab, 'type'):
+                self.exchange_rate_input.setEnabled(False)
+                self.exchange_rate_input.setValue(1.0)
+                return
             # Enable/disable main exchange rate input
             if current_tab.type == "bank":
                 self.exchange_rate_input.setEnabled(True)
@@ -508,11 +527,9 @@ class ExcelLike(QMainWindow):
         for i in reversed(range(self.tabs.count())):
             if self.tabs.tabText(i) == "+":
                 self.tabs.removeTab(i)
-                break
         # Add a single '+' tab at the end
         plus_index = self.tabs.addTab(QWidget(), "+")
         self.tabs.tabBar().setTabButton(self.tabs.count()-1, QTabBar.RightSide, None)
-        # Remove close button from the plus tab
         self.tabs.tabBar().setTabButton(plus_index, QTabBar.LeftSide, None)
         self.tabs.tabBar().setTabButton(plus_index, QTabBar.RightSide, None)
 
@@ -573,24 +590,21 @@ class ExcelLike(QMainWindow):
             self.on_tab_changed(index)
 
     def _on_tab_moved(self, from_index, to_index):
-        plus_index = self.tabs.count() - 1
-        current_index = self.tabs.currentIndex()
-        # Only re-add the plus tab if it was moved
-        if from_index == plus_index or to_index == plus_index:
-            # Remove all existing '+' tabs first
-            for i in reversed(range(self.tabs.count())):
-                if self.tabs.tabText(i) == "+":
-                    self.tabs.removeTab(i)
-                    break
-            # Add a single '+' tab at the end
-            self.tabs.addTab(QWidget(), "+")
-            self.tabs.tabBar().setTabButton(self.tabs.count()-1, QTabBar.RightSide, None)
-            # Remove close button from the plus tab
-            self.tabs.tabBar().setTabButton(plus_index, QTabBar.LeftSide, None)
-            self.tabs.tabBar().setTabButton(plus_index, QTabBar.RightSide, None)
-            # Restore focus
-            if current_index < self.tabs.count():
-                self.tabs.setCurrentIndex(current_index)
+        # Always move the plus tab to the rightmost position after any move
+        plus_tab_index = None
+        for i in range(self.tabs.count()):
+            if self.tabs.tabText(i) == "+":
+                plus_tab_index = i
+                break
+        if plus_tab_index is not None and plus_tab_index != self.tabs.count() - 1:
+            # Remove and re-add the plus tab at the end
+            plus_widget = self.tabs.widget(plus_tab_index)
+            self.tabs.removeTab(plus_tab_index)
+            new_index = self.tabs.addTab(plus_widget, "+")
+            self.tabs.tabBar().setTabButton(new_index, QTabBar.RightSide, None)
+            self.tabs.tabBar().setTabButton(new_index, QTabBar.LeftSide, None)
+            self.tabs.setCurrentIndex(new_index)
+
         # Only call reorder_sheets for real sheet tabs
         plus_index = self.tabs.count() - 1
         if hasattr(self.sheet_manager, 'reorder_sheets') and from_index < plus_index and to_index < plus_index:

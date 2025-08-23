@@ -19,6 +19,15 @@ logging.basicConfig(
 if __name__ == "__main__":
     app = QApplication(sys.argv)
     win = ExcelLike()
-    win.resize(1000, 600)
+    # Set window size to 80% of the screen size
+    screen = app.primaryScreen()
+    size = screen.availableGeometry()
+    width = int(size.width() * 0.8)
+    height = int(size.height() * 0.8)
+    win.resize(width, height)
+    # Center the window on the screen
+    x = size.x() + (size.width() - width) // 2
+    y = size.y() + (size.height() - height) // 2
+    win.move(x, y)
     win.show()
     sys.exit(app.exec())
