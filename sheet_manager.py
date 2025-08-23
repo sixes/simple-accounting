@@ -13,7 +13,7 @@ class SheetManager:
 
     def create_bank_sheet(self, name, currency=None):
         """Create a bank sheet with exchange rate control"""
-        columns = ["序號", "日期", "對方科目", "摘要", "借方", "貸方", "餘額", "發票號碼"]
+        columns = ["序号", "日期", "对方科目", "子科目", "借方", "贷方", "余额", "发票号码"]
         table = ExcelTable(auto_save_callback=self.main_window.auto_save, name=name, type="bank")
         table.setColumnCount(len(columns))
         table.setHorizontalHeaderLabels(columns)
@@ -37,7 +37,7 @@ class SheetManager:
 
     def create_non_bank_sheet(self, name="非银行交易"):
         """Create a regular sheet"""
-        columns = ["序 號", "日  期", "對方科目", "子科目", "摘   要", "借方(USD)", "借方(EUR)", "借方(JPY)", "借方(GBP)", "借方(CHF)", "借方(CAD)", "借方(AUD)", "借方(CNY)", "借方(HKD)", "借方(NZD)", "贷方(USD)", "贷方(EUR)", "贷方(JPY)", "贷方(GBP)", "贷方(CHF)", "贷方(CAD)", "贷方(AUD)", "贷方(CNY)", "贷方(HKD)", "贷方(NZD)", "备注"]
+        columns = ["序号", "日期", "借方科目", "子科目", "贷方科目", "子科目", "借方(USD)", "借方(EUR)", "借方(JPY)", "借方(GBP)", "借方(CHF)", "借方(CAD)", "借方(AUD)", "借方(CNY)", "借方(HKD)", "借方(NZD)", "贷方(USD)", "贷方(EUR)", "贷方(JPY)", "贷方(GBP)", "贷方(CHF)", "贷方(CAD)", "贷方(AUD)", "贷方(CNY)", "贷方(HKD)", "贷方(NZD)", "备注", "来源"]
         table = ExcelTable(auto_save_callback=self.main_window.auto_save, name=name, type="non_bank")
         table.setColumnCount(len(columns))
         table.setHorizontalHeaderLabels(columns)
@@ -49,17 +49,17 @@ class SheetManager:
     def create_payable_detail_sheet(self, sheet_name):
         """Create a payable sheet with exactly the same header structure as the sales sheet"""
         # Use the same main and sub headers, merged ranges, and formatting as sales sheet
-        main_headers = [
-            "序 號", "日  期", "對方科目", "子科目", "發票號碼",
+        columns = [
+            "序号", "日期", "对方科目", "子科目", "发票号码",
             "借方(USD)", "借方(EUR)", "借方(JPY)", "借方(GBP)", "借方(CHF)", "借方(CAD)", "借方(AUD)", "借方(CNY)", "借方(HKD)", "借方(NZD)",
             "贷方(USD)", "贷方(EUR)", "贷方(JPY)", "贷方(GBP)", "贷方(CHF)", "贷方(CAD)", "贷方(AUD)", "贷方(CNY)", "贷方(HKD)", "贷方(NZD)",
-            "餘額", "摘  要", "來源"
+            "余额", "摘要", "来源"
         ]
         table = ExcelTable("payable_detail", auto_save_callback=self.main_window.auto_save, name=sheet_name)
-        table.setColumnCount(len(main_headers))
+        table.setColumnCount(len(columns))
         table.setHorizontalHeaderLabels(columns)
         table.setRowCount(300)
-        self.main_window.sheets.append(table)
+        self.main_window.tabs.addTab(table, sheet_name)
         self.main_window.sheets.append(table)
         return table
 

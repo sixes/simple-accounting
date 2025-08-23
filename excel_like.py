@@ -1,7 +1,7 @@
 from PySide6.QtWidgets import (
     QMainWindow, QTabWidget, QLineEdit, QLabel, QHBoxLayout, QVBoxLayout,
     QWidget, QInputDialog, QDateEdit, QDialog, QMenu, QMessageBox, QDoubleSpinBox,
-    QToolButton, QTabBar, QApplication, QPushButton
+    QToolButton, QTabBar, QApplication, QPushButton, QTableWidgetItem
 )
 from PySide6.QtGui import QAction, QPalette
 from PySide6.QtCore import Qt, QDate, qInstallMessageHandler
@@ -76,7 +76,158 @@ class ExcelLike(QMainWindow):
         self._add_plus_tab()
 
     def on_update_clicked(self):
-        pass
+        # 1. Collect data from all sheets
+        bank_data = []
+        non_bank_data = []
+        non_bank_header = None
+        # Find all sheets and collect data
+        for i, sheet in enumerate(self.sheets):
+            if getattr(sheet, 'type', None) == 'bank':
+                headers = [sheet.horizontalHeaderItem(j).text() for j in range(sheet.columnCount())]
+                idx_duifang = headers.index("对方科目") if "对方科目" in headers else -1
+                idx_zike = headers.index("子科目") if "子科目" in headers else -1
+                idx_debit = headers.index("借方") if "借方" in headers else -1
+                idx_credit = headers.index("贷方") if "贷方" in headers else -1
+                idx_balance = headers.index("余额") if "余额" in headers else -1
+                for row in range(sheet.rowCount()):
+                    key = None
+                    if idx_duifang >= 0 and idx_zike >= 0:
+                        duifang = sheet.item(row, idx_duifang).text() if sheet.item(row, idx_duifang) else ""
+                        zike = sheet.item(row, idx_zike).text() if sheet.item(row, idx_zike) else ""
+                        key = duifang
+                        if zike != "":
+                            key = duifang + "-" + zike
+                    debit_val = float(sheet.item(row, idx_debit).text().replace(",", "")) if idx_debit >= 0 and sheet.item(row, idx_debit) and sheet.item(row, idx_debit).text() else 0
+                    credit_val = float(sheet.item(row, idx_credit).text().replace(",", "")) if idx_credit >= 0 and sheet.item(row, idx_credit) and sheet.item(row, idx_credit).text() else 0
+                    if (debit_val != 0 or credit_val != 0) and key:
+                        # Build a dict of header:value for this row, skip balance column
+                        row_dict = {}
+                        for c, h in enumerate(headers):
+                            if c == idx_balance:
+                                continue
+                            val = sheet.item(row, c).text() if sheet.item(row, c) else ""
+                            row_dict[h] = val
+                        bank_data.append({
+                            "row_dict": row_dict,
+                            "currency": getattr(sheet, "currency", ""),
+                            "debit": debit_val,
+                            "credit": credit_val,
+                            "key": key
+                        })
+            elif getattr(sheet, 'type', None) == 'non_bank':
+                if not non_bank_header:
+                    non_bank_header = [sheet.horizontalHeaderItem(j).text() for j in range(sheet.columnCount())]
+                headers = [sheet.horizontalHeaderItem(j).text() for j in range(sheet.columnCount())]
+                currency_cols = [(j, h) for j, h in enumerate(headers) if "借方(" in h or "贷方(" in h]
+                idx_duifang = headers.index("借方科目") if "借方科目" in headers else -1
+                idx_zike = headers.index("子科目") if "子科目" in headers else -1
+                idx_daifang = headers.index("贷方科目") if "贷方科目" in headers else -1
+                for row in range(sheet.rowCount()):
+                    key = None
+                    if idx_daifang >= 0 and sheet.item(row, idx_daifang) and sheet.item(row, idx_daifang).text():
+                        daifang = sheet.item(row, idx_daifang).text()
+                        zike = sheet.item(row, idx_zike).text() if idx_zike >= 0 and sheet.item(row, idx_zike) else ""
+                        key = daifang
+                        if zike != "":
+                            key = daifang + "-" + zike
+                    elif idx_duifang >= 0 and sheet.item(row, idx_duifang) and sheet.item(row, idx_duifang).text():
+                        jiefang = sheet.item(row, idx_duifang).text()
+                        zike = sheet.item(row, idx_zike).text() if idx_zike >= 0 and sheet.item(row, idx_zike) else ""
+                        key = jiefang
+                        if zike != "":
+                            key = jiefang + "-" + zike
+                    for col, h in currency_cols:
+                        val = sheet.item(row, col).text() if sheet.item(row, col) else ""
+                        try:
+                            fval = float(val.replace(",", "")) if val else 0
+                        except Exception:
+                            fval = 0
+                        if fval != 0 and key:
+                            # Parse currency from header
+                            if "(" in h and ")" in h:
+                                currency = h.split("(")[1].split(")")[0]
+                            else:
+                                currency = ""
+                            # Build a dict of header:value for this row
+                            row_dict = {}
+                            for c, hh in enumerate(headers):
+                                row_dict[hh] = sheet.item(row, c).text() if sheet.item(row, c) else ""
+                            non_bank_data.append({
+                                "row_dict": row_dict,
+                                "currency": currency,
+                                "col": col,
+                                "value": fval,
+                                "key": key
+                            })
+        # 2. For each key, create a payable detail sheet if not exists
+        all_data = bank_data + non_bank_data
+        keys = set(item["key"] for item in all_data)
+        for key in keys:
+            payable_sheet_name = key
+            payable_sheet = None
+            for s in self.sheets:
+                if getattr(s, 'name', None) == payable_sheet_name:
+                    payable_sheet = s
+                    break
+            if not payable_sheet:
+                if non_bank_header:
+                    print(f"creating payable detail sheet: {payable_sheet_name}")
+                    payable_sheet = self.sheet_manager.create_payable_detail_sheet(payable_sheet_name)
+                else:
+                    QMessageBox.warning(self, "Error", "No non-bank sheet found to create payable detail sheet header.")
+                    continue
+            headers = [payable_sheet.horizontalHeaderItem(j).text() for j in range(payable_sheet.columnCount())]
+            mapping = {"debit": {}, "credit": {}}
+            for idx, h in enumerate(headers):
+                if "借方(" in h:
+                    currency = h.split("(")[1].split(")")[0]
+                    mapping["debit"][currency] = idx
+                elif "贷方(" in h:
+                    currency = h.split("(")[1].split(")")[0]
+                    mapping["credit"][currency] = idx
+            filtered_bank_data = [item for item in bank_data if item["key"] == key]
+            filtered_non_bank_data = [item for item in non_bank_data if item["key"] == key]
+            # Merge and sort by date column (ascending)
+            all_rows = []
+            for item in filtered_bank_data:
+                row_dict = item["row_dict"]
+                date_val = row_dict.get("日期", "")
+                all_rows.append((date_val, 'bank', item))
+            for item in filtered_non_bank_data:
+                row_dict = item["row_dict"]
+                date_val = row_dict.get("日期", "")
+                all_rows.append((date_val, 'non_bank', item))
+            # Sort by date string (assume format yyyy/MM/dd or similar, fallback to string sort)
+            def date_key(x):
+                from datetime import datetime
+                try:
+                    return datetime.strptime(x[0], "%Y/%m/%d")
+                except Exception:
+                    return x[0]
+            all_rows.sort(key=date_key)
+            # Set row count to at least 300
+            payable_sheet.setRowCount(max(300, len(all_rows) + 10))
+            row_idx = 0
+            for date_val, typ, item in all_rows:
+                row_dict = item["row_dict"]
+                currency = item["currency"]
+                if typ == 'bank':
+                    for h, v in row_dict.items():
+                        if h in headers and not ("余额" in h):
+                            col_idx = headers.index(h)
+                            payable_sheet.setItem(row_idx, col_idx, QTableWidgetItem(v))
+                    if item["debit"] != 0 and currency in mapping["debit"]:
+                        payable_sheet.setItem(row_idx, mapping["debit"][currency], QTableWidgetItem(str(item["debit"])))
+                    elif item["credit"] != 0 and currency in mapping["credit"]:
+                        payable_sheet.setItem(row_idx, mapping["credit"][currency], QTableWidgetItem(str(item["credit"])))
+                else:
+                    for h, v in row_dict.items():
+                        if h in headers and not ("余额" in h or "借方(" in h or "贷方(" in h):
+                            col_idx = headers.index(h)
+                            payable_sheet.setItem(row_idx, col_idx, QTableWidgetItem(v))
+                    if currency in mapping["debit"]:
+                        payable_sheet.setItem(row_idx, mapping["debit"][currency], QTableWidgetItem(str(item["value"])))
+                row_idx += 1
 
     def setup_top_bar(self):
         """Setup the top bar with company name, exchange rate, and period inputs"""
