@@ -9,6 +9,7 @@ from dialogs import AddSheetDialog
 from sheet_manager import SheetManager
 from file_manager import FileManager
 import platform
+import time
 
 def qt_message_handler(mode, context, message):
     if "single cell span won't be added" in message:
@@ -173,6 +174,7 @@ class ExcelLike(QMainWindow):
         # 2. For each key, create a payable detail sheet if not exists
         all_data = bank_data + non_bank_data
         keys = set(item["key"] for item in all_data)
+        print(f"[DEBUG] Start payable detail update for {len(keys)} keys at", time.time())
         for key in keys:
             payable_sheet_name = key
             payable_sheet = None
@@ -182,17 +184,16 @@ class ExcelLike(QMainWindow):
                     break
             if not payable_sheet:
                 if non_bank_header:
-                    print(f"creating payable detail sheet: {payable_sheet_name}")
+                    print(f"[DEBUG] Creating payable detail sheet: {payable_sheet_name} at", time.time())
                     payable_sheet = self.sheet_manager.create_payable_detail_sheet(payable_sheet_name)
                 else:
                     QMessageBox.warning(self, "Error", "No non-bank sheet found to create payable detail sheet header.")
                     continue
             else:
-                # Erase all existing data in the payable detail sheet before writing new data
-                #payable_sheet.setRowCount(300)  # or any default row count you want
-                for row in range(payable_sheet.rowCount()):
-                    for col in range(payable_sheet.columnCount()):
-                        payable_sheet.setItem(row, col, QTableWidgetItem(""))
+                print(f"[DEBUG] Erasing data in payable sheet: {payable_sheet_name} at", time.time())
+                payable_sheet.clearContents()
+                print(f"[DEBUG] Finished erasing data in {payable_sheet_name} at", time.time())
+            print(f"[DEBUG] Building headers and mapping for {payable_sheet_name} at", time.time())
             headers = [payable_sheet.horizontalHeaderItem(j).text() for j in range(payable_sheet.columnCount())]
             mapping = {"debit": {}, "credit": {}}
             for idx, h in enumerate(headers):
@@ -202,9 +203,9 @@ class ExcelLike(QMainWindow):
                 elif "贷方(" in h:
                     currency = h.split("(")[1].split(")")[0]
                     mapping["credit"][currency] = idx
+            print(f"[DEBUG] Filtering and sorting data for {payable_sheet_name} at", time.time())
             filtered_bank_data = [item for item in bank_data if item["key"] == key]
             filtered_non_bank_data = [item for item in non_bank_data if item["key"] == key]
-            # Merge and sort by date column (ascending)
             all_rows = []
             for item in filtered_bank_data:
                 row_dict = item["row_dict"]
@@ -214,7 +215,6 @@ class ExcelLike(QMainWindow):
                 row_dict = item["row_dict"]
                 date_val = row_dict.get("日期", "")
                 all_rows.append((date_val, 'non_bank', item))
-            # Sort by date string (assume format yyyy/MM/dd or similar, fallback to string sort)
             def date_key(x):
                 from datetime import datetime
                 for fmt in ("%Y/%m/%d", "%m/%d/%y", "%Y-%m-%d", "%m-%d-%y"):
@@ -222,22 +222,20 @@ class ExcelLike(QMainWindow):
                         return datetime.strptime(x[0], fmt)
                     except Exception:
                         continue
-                # If all parsing fails, return a very old date so it sorts first
                 return datetime(1900, 1, 1)
             all_rows.sort(key=date_key)
-            # Set row count to at least 300
+            print(f"[DEBUG] Finished sorting data for {payable_sheet_name} at", time.time())
             payable_sheet.setRowCount(max(100, len(all_rows) + 10))
             row_idx = 0
+            print(f"[DEBUG] Writing data to payable sheet {payable_sheet_name} at", time.time())
             for date_val, typ, item in all_rows:
                 row_dict = item["row_dict"]
                 currency = item["currency"]
-                # Find source column index
                 source_col_idx = None
                 for idx, h in enumerate(headers):
                     if h == "来源":
                         source_col_idx = idx
                         break
-                # Write data
                 if typ == 'bank':
                     for h, v in row_dict.items():
                         if h in headers and not ("余额" in h):
@@ -247,7 +245,6 @@ class ExcelLike(QMainWindow):
                         payable_sheet.setItem(row_idx, mapping["debit"][currency], QTableWidgetItem(str(item["debit"])))
                     elif item["credit"] != 0 and currency in mapping["credit"]:
                         payable_sheet.setItem(row_idx, mapping["credit"][currency], QTableWidgetItem(str(item["credit"])))
-                    # Set source column
                     if source_col_idx is not None:
                         payable_sheet.setItem(row_idx, source_col_idx, QTableWidgetItem(f"{item.get('sheet_name', '')}:{item.get('row_number', '')}"))
                 else:
@@ -255,12 +252,9 @@ class ExcelLike(QMainWindow):
                         if h in headers and not ("余额" in h or "借方(" in h or "贷方(" in h):
                             col_idx = headers.index(h)
                             payable_sheet.setItem(row_idx, col_idx, QTableWidgetItem(v))
-                    if currency in mapping["debit"]:
-                        payable_sheet.setItem(row_idx, mapping["debit"][currency], QTableWidgetItem(str(item["value"])))
-                    # Set source column
-                    if source_col_idx is not None:
-                        payable_sheet.setItem(row_idx, source_col_idx, QTableWidgetItem(f"{item.get('sheet_name', '')}:{item.get('row_number', '')}"))
                 row_idx += 1
+            print(f"[DEBUG] Finished writing data to {payable_sheet_name} at", time.time())
+        print(f"[DEBUG] Finished payable detail update at", time.time())
         self._add_plus_tab()
 
     def setup_top_bar(self):
@@ -384,6 +378,60 @@ class ExcelLike(QMainWindow):
 
             if text == "Delete Sheet":
                 file_menu.addSeparator()
+
+        # Add tab switcher to menu
+        navigate_menu = self.menu.addMenu("Navigate")
+        switch_tab_action = QAction("Switch Tab...", self)
+        switch_tab_action.setShortcut("Ctrl+K")
+        switch_tab_action.triggered.connect(self.show_tab_switcher)
+        navigate_menu.addAction(switch_tab_action)
+
+        # Add right-click context menu for tab switching
+        self.tabs.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.tabs.customContextMenuRequested.connect(self.show_tab_context_menu)
+        # Make tab bar scrollable
+        self.tabs.setTabBarAutoHide(False)
+        self.tabs.setUsesScrollButtons(True)
+        self.tabs.tabBar().setElideMode(Qt.ElideRight)
+        # Set tooltips for all tabs
+        self.tabs.currentChanged.connect(self.update_tab_tooltips)
+        self.update_tab_tooltips()
+        # Set tab width to fit sheet name
+        self.adjust_tab_widths()
+
+    def adjust_tab_widths(self):
+        tab_bar = self.tabs.tabBar()
+        font_metrics = tab_bar.fontMetrics()
+        for i in range(tab_bar.count()):
+            text = tab_bar.tabText(i)
+            tab_bar.setTabToolTip(i, text)  # Set tooltip for full name
+
+    def update_tab_tooltips(self):
+        for i in range(self.tabs.count()):
+            name = self.tabs.tabText(i)
+            self.tabs.setTabToolTip(i, name)
+        self.adjust_tab_widths()
+
+    def show_tab_context_menu(self, pos):
+        menu = QMenu(self)
+        from PySide6.QtGui import QActionGroup
+        tab_names = [self.tabs.tabText(i) for i in range(self.tabs.count()) if self.tabs.tabText(i) != "+"]
+        current_index = self.tabs.currentIndex()
+        group = QActionGroup(menu)
+        group.setExclusive(True)
+        for i, name in enumerate(tab_names):
+            action = QAction(name, menu)
+            action.setCheckable(True)
+            if i == current_index:
+                action.setChecked(True)
+            action.triggered.connect(lambda checked, idx=i: self.tabs.setCurrentIndex(idx))
+            group.addAction(action)
+            menu.addAction(action)
+        menu.addSeparator()
+        switcher_action = QAction("Switch Tab...", menu)
+        switcher_action.triggered.connect(self.show_tab_switcher)
+        menu.addAction(switcher_action)
+        menu.exec(self.tabs.mapToGlobal(pos))
 
     def add_sheet(self, name=None, is_bank=False):
         """Add a new sheet with optional name and type"""
@@ -695,3 +743,15 @@ class ExcelLike(QMainWindow):
                     color: black;
                 }
             """)
+    def show_tab_switcher(self):
+        """Show a dropdown dialog to quickly jump to any tab by name."""
+        from PySide6.QtWidgets import QInputDialog
+        tab_names = [self.tabs.tabText(i) for i in range(self.tabs.count()) if self.tabs.tabText(i) != "+"]
+        if not tab_names:
+            return
+        name, ok = QInputDialog.getItem(self, "Switch Tab", "Select a sheet:", tab_names, 0, False)
+        if ok and name:
+            for i in range(self.tabs.count()):
+                if self.tabs.tabText(i) == name:
+                    self.tabs.setCurrentIndex(i)
+                    break

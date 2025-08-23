@@ -168,15 +168,15 @@ class ExcelTable(QTableWidget):
                     # For aggregate sheets, only show currency column sums, no balance
                     if col in currency_sums:
                         currency, column_sum = currency_sums[col]
-                        text = self._format_number(column_sum)
+                        text = self.format_number(column_sum)
                 else:
                     # For bank sheets, show debit/credit/balance as before
                     if col == debit_col:
-                        text = self._format_number(debit_sum)
+                        text = self.format_number(debit_sum)
                     elif col == credit_col:
-                        text = self._format_number(credit_sum)
+                        text = self.format_number(credit_sum)
                     elif col == balance_col:
-                        text = self._format_number(balance)
+                        text = self.format_number(balance)
 
                 # Use darker text color for better visibility
                 painter.setPen(QColor(40, 40, 40))
@@ -214,15 +214,15 @@ class ExcelTable(QTableWidget):
                     # For aggregate sheets, only show HKD equivalent for currency columns, no balance
                     if col in currency_sums:
                         currency, column_sum = currency_sums[col]
-                        text = self._format_number(column_sum * rate)
+                        text = self.format_number(column_sum * rate)
                 else:
                     # For bank sheets, show debit/credit/balance as before
                     if col == debit_col:
-                        text = self._format_number(debit_sum * rate)
+                        text = self.format_number(debit_sum * rate)
                     elif col == credit_col:
-                        text = self._format_number(credit_sum * rate)
+                        text = self.format_number(credit_sum * rate)
                     elif col == balance_col:
-                        text = self._format_number(hkd_balance)
+                        text = self.format_number(hkd_balance)
 
                 # Use darker text color for better visibility
                 painter.setPen(QColor(40, 40, 40))
@@ -231,11 +231,28 @@ class ExcelTable(QTableWidget):
         finally:
             painter.end()
 
-    def _format_number(self, value):
-        """Helper method to format numbers consistently"""
-        abs_value = abs(value)
-        formatted = f"{abs_value:,.2f}" if abs_value >= 1000 else f"{abs_value:.2f}"
-        return f"({formatted})" if value < 0 else formatted
+    @staticmethod
+    def format_number(value):
+        """Format a number with commas, 2 decimals, and parentheses for negatives."""
+        try:
+            abs_value = abs(value)
+            formatted = f"{abs_value:,.2f}" if abs_value >= 1000 else f"{abs_value:.2f}"
+            return f"({formatted})" if value < 0 else formatted
+        except Exception:
+            return str(value)
+
+    @staticmethod
+    def parse_number(text):
+        """Parse a formatted number string, handling parentheses for negatives."""
+        if not text:
+            return 0.0
+        text = text.replace(',', '').strip()
+        if text.startswith('(') and text.endswith(')'):
+            text = '-' + text[1:-1]
+        try:
+            return float(text)
+        except Exception:
+            return 0.0
 
     def resizeEvent(self, event):
         """Handle resize events to ensure proper viewport updates on Windows"""
@@ -334,32 +351,41 @@ class ExcelTable(QTableWidget):
             scrollbar.setValue(max_scroll)
 
     def _on_item_changed(self, item):
-        # Only recalculate if debit, credit, or balance in first row changes
         balance_col = None
         debit_col = None
         credit_col = None
-        
         # Skip balance calculation for aggregate sheets (they don't use traditional debit/credit structure)
         if self.type == "aggregate":
             self._auto_save()
             return
-            
         for col in range(self.columnCount()):
             header_item = self.horizontalHeaderItem(col)
             if header_item is None:
-                continue  # Skip columns without header items
+                continue
             header = header_item.text().replace(" ", "")
-            if "餘額" in header:
+            if "余额" in header:
                 balance_col = col
             if "借方" in header:
                 debit_col = col
-            if "貸方" in header:
+            if "貸方" in header or "贷方" in header:
                 credit_col = col
         if balance_col is None or debit_col is None or credit_col is None:
             self._auto_save()
             return
         row = item.row()
         col = item.column()
+        # Always set first row balance cell editable, others read-only
+        self.blockSignals(True)
+        for r in range(self.rowCount()):
+            bal_item = self.item(r, balance_col)
+            if not bal_item:
+                bal_item = QTableWidgetItem()
+                self.setItem(r, balance_col, bal_item)
+            if r == 0:
+                bal_item.setFlags(bal_item.flags() | Qt.ItemIsEditable)
+            else:
+                bal_item.setFlags(bal_item.flags() & ~Qt.ItemIsEditable)
+        self.blockSignals(False)
         # Only allow editing balance in first row
         if col == balance_col and row > 0:
             self.blockSignals(True)
@@ -373,36 +399,17 @@ class ExcelTable(QTableWidget):
                 prev_balance = self.item(r-1, balance_col)
                 debit = self.item(r, debit_col)
                 credit = self.item(r, credit_col)
-                try:
-                    prev_text = prev_balance.text().replace(',', '') if prev_balance and prev_balance.text() else '0'
-                    prev_val = float(prev_text) if prev_text else 0.0
-                except Exception:
-                    prev_val = 0.0
-                try:
-                    debit_text = debit.text().replace(',', '') if debit and debit.text() else '0'
-                    debit_val = float(debit_text) if debit_text else 0.0
-                except Exception:
-                    debit_val = 0.0
-                try:
-                    credit_text = credit.text().replace(',', '') if credit and credit.text() else '0'
-                    credit_val = float(credit_text) if credit_text else 0.0
-                except Exception:
-                    credit_val = 0.0
+                prev_val = self.parse_number(prev_balance.text()) if prev_balance and prev_balance.text() else 0.0
+                debit_val = self.parse_number(debit.text()) if debit and debit.text() else 0.0
+                credit_val = self.parse_number(credit.text()) if credit and credit.text() else 0.0
                 bal = prev_val + debit_val - credit_val
                 bal_item = self.item(r, balance_col)
                 if not bal_item:
                     bal_item = QTableWidgetItem()
                     self.setItem(r, balance_col, bal_item)
-                # Format balance: no minus sign, comma separation for >1000
-                abs_bal = abs(bal)
-                if abs_bal >= 1000:
-                    bal_text = f"{abs_bal:,.2f}"
-                else:
-                    bal_text = f"{abs_bal:.2f}"
+                bal_text = self.format_number(bal)
                 bal_item.setText(bal_text)
-                bal_item.setFlags(bal_item.flags() & ~Qt.ItemIsEditable)
             self.blockSignals(False)
-        self.update_pinned_rows()
         self._auto_save()
 
     def update_pinned_rows(self):
