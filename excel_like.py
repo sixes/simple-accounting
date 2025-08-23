@@ -228,6 +228,9 @@ class ExcelLike(QMainWindow):
             payable_sheet.setRowCount(max(100, len(all_rows) + 10))
             row_idx = 0
             print(f"[DEBUG] Writing data to payable sheet {payable_sheet_name} at", time.time())
+            # Determine if special handling is needed for this sheet name
+            is_creditor = payable_sheet_name in ["销售收入", "銷售收入", "利息收入"]
+            is_debit = payable_sheet_name in ["销售成本", "銷售成本", "银行费用", "銀行費用"]
             for date_val, typ, item in all_rows:
                 row_dict = item["row_dict"]
                 currency = item["currency"]
@@ -241,10 +244,16 @@ class ExcelLike(QMainWindow):
                         if h in headers and not ("余额" in h):
                             col_idx = headers.index(h)
                             payable_sheet.setItem(row_idx, col_idx, QTableWidgetItem(v))
-                    if item["debit"] != 0 and currency in mapping["debit"]:
-                        payable_sheet.setItem(row_idx, mapping["debit"][currency], QTableWidgetItem(str(item["debit"])))
-                    elif item["credit"] != 0 and currency in mapping["credit"]:
-                        payable_sheet.setItem(row_idx, mapping["credit"][currency], QTableWidgetItem(str(item["credit"])))
+                    # Special handling for payable detail sheets
+                    if is_creditor and currency in mapping["credit"]:
+                        payable_sheet.setItem(row_idx, mapping["credit"][currency], QTableWidgetItem(str(item["debit"] + item["credit"])))
+                    elif is_debit and currency in mapping["debit"]:
+                        payable_sheet.setItem(row_idx, mapping["debit"][currency], QTableWidgetItem(str(item["debit"] + item["credit"])))
+                    else:
+                        if item["debit"] != 0 and currency in mapping["debit"]:
+                            payable_sheet.setItem(row_idx, mapping["debit"][currency], QTableWidgetItem(str(item["debit"])))
+                        elif item["credit"] != 0 and currency in mapping["credit"]:
+                            payable_sheet.setItem(row_idx, mapping["credit"][currency], QTableWidgetItem(str(item["credit"])))
                     if source_col_idx is not None:
                         payable_sheet.setItem(row_idx, source_col_idx, QTableWidgetItem(f"{item.get('sheet_name', '')}:{item.get('row_number', '')}"))
                 else:
@@ -522,11 +531,11 @@ class ExcelLike(QMainWindow):
             if reply == QMessageBox.Yes:
                 # Check if this is a bank sheet (has currency)
                 is_bank_sheet = hasattr(sheet_to_delete, 'type') and sheet_to_delete.type == "bank"
-                
+
                 self.tabs.removeTab(idx)
                 del self.sheets[idx]
                 self._add_plus_tab()
-                
+
                 self.auto_save()
             self._suppress_plus_tab = False
 

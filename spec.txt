@@ -1,0 +1,81 @@
+ 非银行科目交易 需要手工输入： 
+ 借方科目 借方子科目 贷方科目 贷方子科目 摘要 日期 借方金额（多币种） 贷方金额（多币种） 
+
+
+
+ 现金  10000 应收账款-A公司 9900
+            汇总损益       100
+
+
+
+
+ 互转
+
+ 对方科目为 银行名称，同一天，互转，借方代表进账，贷方代表出账 
+
+ --》 汇总损益表：金额=借方-贷方
+
+
+
+若汇总总计（期末结余）是正数，放在利润表中的 加：汇兑收益（类似利息收入）；
+ 如果是负数，放在 减：汇兑损益
+
+最终生成利润表和资产负债表
+
+
+ 期末汇总损益
+ 每个币种有2个汇率，当前本期用本期汇率；只有期末汇总损益使用期末汇率
+
+
+
+ when clicking update,
+ scan all the bank sheets and non bank sheet, 
+ if 對方科目 column value is 應付賬款, generate a new sheet, with name = 應付賬款-摘  要 column value,
+ the header columns for this sheet are:
+ header 1: 序 號	日  期	對方科目	摘  要	借     方			貸     方			餘  額
+ header 2: below 借     方 column, there are 5 columns: 原币(USD)	原币(EUR)	原币(HKD) 原币(JPY)	原币(GBP)
+ below 貸     方 column, there are 5 columns: 原币(USD)	原币(EUR)	原币(HKD) 原币(JPY)	原币(GBP)
+
+then copy the entire row to this new sheet
+
+
+
+
+for on_update_clicked method: 
+1 scan bank type sheets, use 對方科目 and 子科目 as key to categorzie the data, save this row data and sheet.currency, find debitor or creditor column value whichever is not 0
+2 scan non-bank type sheets, use 贷方科目 + 子科目 if not empty or 借方科目 + 子科目 if not empty to categorize the data,  then find any non-zero vaule in any columns containing "原币(" at row 1 (row index start at 0), and parse this column name, such as "原币(USD)", parse this column name to get the currency USD, then save this row data and currency
+3 create payable detail sheet if it does not exist, the header column is the same to non-bank type sheet, but when creating the structure, save the mapping, map[debit][currency] = column_index, map[credit][currency] = column_index, 
+
+4 insert all the data into this sheet, all column values should be placed into the corresponding columns, the currency value should be put into the correct column,since you have the source currency, so you should know, find the correct column index via mapping. for those currency values, it should be positioned in one of debit column
+
+
+For bank type sheets or non-bank type sheet: 
+if CounterpartSubject/DebitSubject/CreditSubject is 销售收入, the currency value should be put in the respective currency creditor column; write in this way: 销售收入 --> creditor col
+for others:
+销售成本 --> debit col
+银行费用 --> debit col
+利息收入 --> creditor col
+
+
+for the payable detail sheets, if the sheet name is 销售收入 or 銷售收入, the currency values should be placed in the creditor(currency) column, such as 贷方(USD), the followings are similar:
+销售成本 or 銷售成本--> debit col
+银行费用 or 銀行費用--> debit col
+利息收入 --> creditor col
+
+
+should be: 银行费用 --> debit col, now debit col +all the creditor columns are filled with the same value
+should be: 销售成本 --> debit col, now debit col +all the creditor columns are filled with the same value
+should be: 销售收入 --> creditor col, now all creditor col are empty + all debit col are filled with the same value
+and i have 利息收入 in CounterpartSubject in bank sheet, you don't generate 利息收入 new sheet
+
+
+
+when modify cell data in debit or creditor columns in bank type sheet, should automatically calculate the balance column vaules:
+1 row 1: the balance can be editable, user can input data
+2 starting from row 2: current row balance = current row debit - current row credit + last row balance, this balance value should only readable
+
+
+
+
+
+

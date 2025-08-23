@@ -834,6 +834,10 @@ class ExcelTable(QTableWidget):
         menu.addAction(split)
         menu.addSeparator()
 
+        currency_exchange_action = QAction("Add Currency Exchange", self)
+        menu.addAction(currency_exchange_action)
+        currency_exchange_action.triggered.connect(self.open_currency_exchange_dialog)
+
         # File operations
         new_file = QAction("New", self)
         add_sheet = QAction("Add Sheet", self)
@@ -876,6 +880,15 @@ class ExcelTable(QTableWidget):
             load_file.triggered.connect(parent_window.load_file)
 
         menu.exec(self.viewport().mapToGlobal(pos))
+
+    def open_currency_exchange_dialog(self):
+        """Open the Currency Exchange P/L dialog for this sheet."""
+        from currency_exchange_dialog import CurrencyExchangePLDialog
+        parent_window = self.window()
+        # Pass all sheets to the dialog for dropdown population
+        if hasattr(parent_window, 'sheets'):
+            dialog = CurrencyExchangePLDialog(parent=self, all_sheets=parent_window.sheets, from_sheet=self)
+            dialog.exec()
 
     def clear_cell_contents(self):
         """Clear content from selected cells while preserving formatting"""
