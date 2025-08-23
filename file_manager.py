@@ -166,9 +166,6 @@ class FileManager:
         # Second pass: load data and add sheets in correct order
         tab_order = data.get("tab_order", [sheet["name"] for sheet in data.get("sheets", [])])
         logger.info(f"tab_order: {tab_order}")
-        aggregate_names = [
-            "銷售收入", "銷售成本", "銀行費用", "利息收入", "董事往來", 
-        ]
         for sheet_name in tab_order:
             if sheet_name in temp_sheets:
                 sheet_info = next((s for s in data["sheets"] if s["name"] == sheet_name), None)

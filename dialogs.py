@@ -22,7 +22,7 @@ class AddSheetDialog(QDialog):
 
         self.currency_label = QLabel("Currency:")
         self.currency_combo = QComboBox()
-        self.currency_combo.addItems(["USD", "RMB", "HKD", "EUR", "JPY", "GBP",])
+        self.currency_combo.addItems(["USD", "EUR", "JPY", "GBP", "AUD", "CAD", "CHF", "CNY", "HKD", "NZD"])
         layout.addWidget(self.currency_label)
         layout.addWidget(self.currency_combo)
         self.currency_combo.setEnabled(False)

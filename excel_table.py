@@ -25,21 +25,14 @@ class ExcelTable(QTableWidget):
         self._custom_headers = None  # Track custom headers
         
         # For aggregate sheets, set up 2-row horizontal header
-        if self.type == "aggregate":
-            self.horizontalHeader().setMinimumSectionSize(60)
-            self.horizontalHeader().setDefaultSectionSize(80)
-            # We'll set this up in setup_two_row_headers method
-            # Store pinned height for scroll limiting
-            self._pinned_height = 48  # 2 rows * 24px
-        else:
-            self.update_headers()
-            # For bank sheets, set up bottom margins for pinned rows
-            row_height = 24  # Default row height
-            pinned_height = row_height * 2
-            self.setViewportMargins(0, 0, 0, pinned_height)
-            
-            # Store pinned height for scroll limiting
-            self._pinned_height = pinned_height
+        self.update_headers()
+        # For bank sheets, set up bottom margins for pinned rows
+        row_height = 24  # Default row height
+        pinned_height = row_height * 2
+        self.setViewportMargins(0, 0, 0, pinned_height)
+
+        # Store pinned height for scroll limiting
+        self._pinned_height = pinned_height
             
         self.horizontalHeader().setStretchLastSection(True)
         self.verticalHeader().setDefaultSectionSize(24)
@@ -56,12 +49,6 @@ class ExcelTable(QTableWidget):
         self.verticalScrollBar().valueChanged.connect(self._on_scroll)
         self.horizontalScrollBar().valueChanged.connect(self._on_scroll)
         
-        # Set up a timer to constantly enforce scroll limits
-#        self._scroll_limit_timer = QTimer()
-#        self._scroll_limit_timer.timeout.connect(self._enforce_scroll_limits)
-#        self._scroll_limit_timer.start(100)  # Check every 100ms (reduced frequency for less spam)
-
-
     def paintEvent(self, event):
         # First call the parent paintEvent to draw the table contents
         super().paintEvent(event)

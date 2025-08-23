@@ -289,44 +289,8 @@ class ExcelLike(QMainWindow):
                 del self.sheets[idx]
                 self._add_plus_tab()
                 
-                # If we deleted a bank sheet, refresh all aggregate sheets to remove the currency column
-                if is_bank_sheet:
-                    print(f"DEBUG: Deleted bank sheet '{sheet_name}', refreshing all aggregate sheets")
-                    self._refresh_all_aggregate_sheets()
-                
                 self.auto_save()
             self._suppress_plus_tab = False
-
-    def _refresh_all_aggregate_sheets(self):
-        """Refresh all aggregate sheets to update currency columns after bank sheet deletion"""
-        print("DEBUG: Refreshing all aggregate sheets after bank sheet deletion")
-        
-        # Save current tab to restore later
-        current_index = self.tabs.currentIndex()
-        
-        # Find and refresh each aggregate sheet
-        for i in range(self.tabs.count()):
-            tab_name = self.tabs.tabText(i)
-            if tab_name in ["銷售收入", "銷售成本", "銀行費用", "利息收入", "董事往來"]:
-                print(f"DEBUG: Refreshing aggregate sheet '{tab_name}'")
-                # Switch to the tab to make it current for refresh
-                self.tabs.setCurrentIndex(i)
-                
-                # Refresh based on sheet type
-                if tab_name == "銷售收入":
-                    self.sheet_manager.refresh_aggregate_sheet("销售收入", "貸     方")
-                elif tab_name == "銷售成本":
-                    self.sheet_manager.refresh_aggregate_sheet("销售成本", "借     方")
-                elif tab_name == "銀行費用":
-                    self.sheet_manager.refresh_aggregate_sheet("银行费用", "借     方")
-                elif tab_name == "利息收入":
-                    self.sheet_manager.refresh_aggregate_sheet("利息收入", "貸     方")
-                elif tab_name == "董事往來":
-                    self.sheet_manager.refresh_aggregate_sheet("董事往来", "貸     方")
-        
-        # Restore original tab selection
-        if current_index < self.tabs.count():
-            self.tabs.setCurrentIndex(current_index)
 
     def close_tab(self, idx):
         """Close tab at given index"""
@@ -359,12 +323,6 @@ class ExcelLike(QMainWindow):
         self.period_to_input.setDate(QDate.currentDate())
         self.sheet_manager.create_bank_sheet("HSBC-USD")
         self.sheet_manager.create_non_bank_sheet()
-        self.sales_sheet = self.sheet_manager.create_sales_sheet()
-        self.cost_sheet = self.sheet_manager.create_cost_sheet()
-        self.sheet_manager.create_bank_fee_sheet()
-        self.sheet_manager.create_interest_sheet()
-        self.sheet_manager.create_payable_sheet()
-        self.sheet_manager.create_director_sheet()
         # Always add '+' tab at the end (even if no other tabs)
         self._add_plus_tab()
         self.auto_save()
@@ -444,24 +402,10 @@ class ExcelLike(QMainWindow):
                         new_sheet = self.sheet_manager.create_bank_sheet(tab_name, currency)
                     except TypeError:
                         new_sheet = self.sheet_manager.create_bank_sheet(tab_name)
-                elif sheet_type == "銷售收入":
-                    new_sheet = self.sheet_manager.create_sales_sheet()
-                elif sheet_type == "銷售成本":
-                    new_sheet = self.sheet_manager.create_cost_sheet()
-                elif sheet_type == "銀行費用":
-                    new_sheet = self.sheet_manager.create_bank_fee_sheet()
-                elif sheet_type == "利息收入":
-                    new_sheet = self.sheet_manager.create_interest_sheet()
-                elif sheet_type == "應付費用":
-                    new_sheet = self.sheet_manager.create_payable_sheet()
-                elif sheet_type == "董事往來":
-                    new_sheet = self.sheet_manager.create_director_sheet()
-                elif sheet_type == "工資":
-                    new_sheet = self.sheet_manager.create_salary_sheet()
                 elif sheet_type == "非银行交易":
                     new_sheet = self.sheet_manager.create_non_bank_sheet(tab_name)
                 else:
-                    new_sheet = self.sheet_manager.create_regular_sheet(tab_name)
+                    print("ERROR: Unknown sheet type from dialog")
                 plus_index = self.tabs.count() - 1
                 if self.tabs.tabText(plus_index) == "+":
                     self.tabs.removeTab(plus_index)
