@@ -1,7 +1,7 @@
 from PySide6.QtWidgets import (
     QMainWindow, QTabWidget, QLineEdit, QLabel, QHBoxLayout, QVBoxLayout,
     QWidget, QInputDialog, QDateEdit, QDialog, QMenu, QMessageBox, QDoubleSpinBox,
-    QToolButton, QTabBar, QApplication, QPushButton, QTableWidgetItem
+    QToolButton, QTabBar, QApplication, QPushButton
 )
 from PySide6.QtGui import QAction, QPalette
 from PySide6.QtCore import Qt, QDate, qInstallMessageHandler
@@ -76,191 +76,7 @@ class ExcelLike(QMainWindow):
         self._add_plus_tab()
 
     def on_update_clicked(self):
-        """Scan all sheets for 應付賬款 entries and create payable sheets"""
-        self.scan_and_create_payable_sheets()
-
-    def scan_and_create_payable_sheets(self):
-        """Scan all bank and non-bank sheets for 應付賬款 entries and create corresponding payable sheets"""
-        payable_data = {}  # Dictionary to group entries by 摘要 (description)
-        
-        # Scan all sheets for 應付賬款 entries
-        for i in range(self.tabs.count()):
-            tab_name = self.tabs.tabText(i)
-            if tab_name == "+" or tab_name.startswith("應付賬款-"):
-                continue  # Skip plus tab and existing payable sheets
-                
-            tab = self.tabs.widget(i)
-            if not hasattr(tab, 'type'):
-                continue
-                
-            # Only scan bank and non_bank sheets
-            if tab.type not in ["bank", "non_bank"]:
-                continue
-                
-            print(f"DEBUG: Scanning sheet '{tab_name}' for 應付賬款 entries")
-            
-            # Find the column indices
-            col_count = tab.columnCount()
-            对方科目_col = None
-            子科目_col = None
-            
-            for col in range(col_count):
-                header_item = tab.horizontalHeaderItem(col)
-                if header_item:
-                    header_text = header_item.text().replace(" ", "")
-                    if "對方科目" in header_text:
-                        对方科目_col = col
-                    elif "子科目" in header_text:
-                        子科目_col = col
-            
-            if 对方科目_col is None or 子科目_col is None:
-                print(f"DEBUG: Could not find required columns in sheet '{tab_name}'")
-                continue
-                
-            # Scan rows for 應付賬款 entries
-            for row in range(tab.rowCount()):
-                对方科目_item = tab.item(row, 对方科目_col)
-                子科目_item = tab.item(row, 子科目_col)
-                
-                if (对方科目_item and 对方科目_item.text().strip() == "應付賬款" and
-                    子科目_item and 子科目_item.text().strip()):
-                    
-                    子科目_value = 子科目_item.text().strip()
-                    print(f"DEBUG: Found 應付賬款 entry with 子科目: '{子科目_value}' in sheet '{tab_name}', row {row}")
-                    
-                    # Initialize the payable group if not exists
-                    if 子科目_value not in payable_data:
-                        payable_data[子科目_value] = []
-                    
-                    # Copy the entire row data
-                    row_data = []
-                    for col in range(col_count):
-                        item = tab.item(row, col)
-                        row_data.append(item.text() if item else "")
-                    
-                    # Store row data with source sheet info
-                    payable_data[子科目_value].append({
-                        'source_sheet': tab_name,
-                        'row_data': row_data,
-                        'source_headers': [tab.horizontalHeaderItem(col).text() if tab.horizontalHeaderItem(col) else f"Col{col}" for col in range(col_count)]
-                    })
-        
-        # Create payable sheets for each 子科目 group
-        for 子科目_value, entries in payable_data.items():
-            sheet_name = f"應付賬款-{子科目_value}"
-            
-            # Check if sheet already exists
-            sheet_exists = False
-            for i in range(self.tabs.count()):
-                if self.tabs.tabText(i) == sheet_name:
-                    sheet_exists = True
-                    existing_sheet = self.tabs.widget(i)
-                    print(f"DEBUG: Sheet '{sheet_name}' already exists, updating it")
-                    break
-            
-            if not sheet_exists:
-                print(f"DEBUG: Creating new payable sheet: '{sheet_name}'")
-                new_sheet = self.sheet_manager.create_payable_detail_sheet(sheet_name)
-                
-                # Remove plus tab temporarily
-                plus_index = self.tabs.count() - 1
-                if self.tabs.tabText(plus_index) == "+":
-                    self.tabs.removeTab(plus_index)
-                
-                # Add the new sheet
-                self.tabs.addTab(new_sheet, sheet_name)
-                self._add_plus_tab()  # Re-add plus tab
-                existing_sheet = new_sheet
-            
-            # Populate the sheet with data
-            self._populate_payable_sheet(existing_sheet, entries)
-        
-        if payable_data:
-            print(f"DEBUG: Created/updated {len(payable_data)} payable sheets")
-            QMessageBox.information(self, "Update Complete", 
-                                   f"Created/updated {len(payable_data)} payable sheets for 應付賬款 entries.")
-        else:
-            QMessageBox.information(self, "Update Complete", 
-                                   "No 應付賬款 entries found in bank or non-bank sheets.")
-    
-    def _populate_payable_sheet(self, sheet, entries):
-        """Populate a payable sheet with the collected entries"""
-        print(f"DEBUG POPULATE: Starting to populate sheet with {len(entries)} entries")
-        print(f"DEBUG POPULATE: Sheet has {sheet.columnCount()} columns and {sheet.rowCount()} rows")
-        
-        # Check headers
-        for col in range(min(sheet.columnCount(), 16)):
-            header_item = sheet.horizontalHeaderItem(col)
-            if header_item:
-                print(f"DEBUG POPULATE: Column {col} header: '{header_item.text()}'")
-            else:
-                print(f"DEBUG POPULATE: Column {col} has no header item")
-        
-        # Clear existing data (keep headers)
-        for row in range(2, sheet.rowCount()):
-            for col in range(sheet.columnCount()):
-                sheet.setItem(row, col, None)
-        # Set row count to accommodate all entries plus some extra
-        sheet.setRowCount(max(len(entries) + 10, 50))
-        # Populate data starting from row 2 (after headers)
-        for row_idx, entry in enumerate(entries):
-            target_row = row_idx + 2
-            source_data = entry['row_data']
-            source_headers = entry['source_headers']
-            source_sheet = entry.get('source_sheet', '')
-            currency = self._extract_currency_from_sheet(source_sheet)
-            print(f"DEBUG PAYABLE: Processing entry from sheet '{source_sheet}' with currency '{currency}'")
-            # Copy all columns except 貸方, which goes to 借方(currency)
-            for src_col, src_value in enumerate(source_data):
-                if src_col < len(source_headers):
-                    src_header = source_headers[src_col].replace(" ", "")
-                    print(f"DEBUG PAYABLE: src_header='{src_header}', src_value='{src_value}'")
-                    # 貸方 value from bank sheet goes to 借方(currency) in payable sheet
-                    if src_header == "貸方" and currency and src_value and src_value.strip():
-                        print(f"DEBUG PAYABLE: Mapping 貸方 value '{src_value}' to 借方({currency}) column")
-                        # Find 借方(currency) column in payable sheet
-                        for col in range(sheet.columnCount()):
-                            # Get currency header from row 1, col
-                            header_item = sheet.item(1, col)
-                            if header_item and header_item.text().replace(" ", "") == f"原币({currency})":
-                                print(f"DEBUG PAYABLE: Setting value '{src_value}' at row {target_row}, col {col}")
-                                sheet.setItem(target_row, col, QTableWidgetItem(str(src_value)))
-                                break
-                        continue  # skip default mapping for 貸方
-                    # Other columns: copy by header match
-                    target_col = None
-                    for col in range(sheet.columnCount()):
-                        target_header_item = sheet.item(0, col)
-                        if target_header_item:
-                            target_header = target_header_item.text().replace(" ", "")
-                            if src_header == target_header or src_header in target_header:
-                                target_col = col
-                                break
-                    if target_col is not None:
-                        print(f"DEBUG PAYABLE: Copying value '{src_value}' to col {target_col} (header '{target_header_item.text()}')")
-                        sheet.setItem(target_row, target_col, QTableWidgetItem(str(src_value)))
-        print(f"DEBUG: Populated payable sheet with {len(entries)} entries")
-    
-    def _extract_currency_from_sheet(self, sheet_name):
-        """Extract currency from sheet name (e.g., 'HSBC-USD' -> 'USD')"""
-        if '-' in sheet_name:
-            return sheet_name.split('-')[-1]
-        return None
-    
-    def _find_currency_column(self, sheet, column_type, currency):
-        """Find the appropriate currency column in the payable sheet"""
-        # Look for columns with the specific currency
-        for col in range(sheet.columnCount()):
-            header_item = sheet.horizontalHeaderItem(col)
-            if header_item:
-                header_text = header_item.text()
-                if f"原币({currency})" in header_text:
-                    # Check if it's the right type (借方 or 貸方)
-                    if "借方" in column_type and col >= 4 and col <= 8:  # Debit currency columns (back to original range)
-                        return col
-                    elif "貸方" in column_type and col >= 9 and col <= 13:  # Credit currency columns (back to original range)
-                        return col
-        return None
+        pass
 
     def setup_top_bar(self):
         """Setup the top bar with company name, exchange rate, and period inputs"""
@@ -339,21 +155,6 @@ class ExcelLike(QMainWindow):
                 self.exchange_rate_input.setEnabled(False)
                 self.exchange_rate_input.setValue(1.0)
 
-            tab_name = self.tabs.tabText(index)
-            if tab_name == "銷售收入":
-                self.sheet_manager.refresh_aggregate_sheet("销售收入", "貸     方")
-            elif tab_name == "銷售成本":
-                self.sheet_manager.refresh_aggregate_sheet("销售成本", "借     方")
-            elif tab_name == "銀行費用":
-                self.sheet_manager.refresh_aggregate_sheet("银行费用", "借     方")
-            elif tab_name == "利息收入":
-                self.sheet_manager.refresh_aggregate_sheet("利息收入", "貸     方")
-            elif tab_name == "應付費用":
-                # do nothing, payable data edit or input by user
-                pass
-            elif tab_name == "董事往來":
-                # Always refresh to get latest bank data at top (not saved to file)
-                self.sheet_manager.refresh_aggregate_sheet("董事往来", "貸     方")
 
     def update_tab_name(self, old_name, new_name):
         """Update the tab text when sheet is renamed, with bank/non-bank name validation"""
@@ -441,25 +242,10 @@ class ExcelLike(QMainWindow):
                     new_sheet = self.sheet_manager.create_bank_sheet(tab_name, currency)
                 except TypeError:
                     raise
-            elif sheet_type == "銷售收入":
-                new_sheet = self.sheet_manager.create_sales_sheet()
-            elif sheet_type == "銷售成本":
-                new_sheet = self.sheet_manager.create_cost_sheet()
-            elif sheet_type == "銀行費用":
-                new_sheet = self.sheet_manager.create_bank_fee_sheet()
-            elif sheet_type == "利息收入":
-                new_sheet = self.sheet_manager.create_interest_sheet()
-            elif sheet_type == "應付費用":
-                new_sheet = self.sheet_manager.create_payable_sheet()
-            elif sheet_type == "董事往來":
-                new_sheet = self.sheet_manager.create_director_sheet()
-            elif sheet_type == "資":
-                new_sheet = self.sheet_manager.create_salary_sheet()
             elif sheet_type == "非银行交易":
                 new_sheet = self.sheet_manager.create_non_bank_sheet()
             else:
                 print(f"DEBUG ADD: Creating regular sheet: {tab_name}")
-                new_sheet = self.sheet_manager.create_regular_sheet(tab_name)
             print(f"DEBUG ADD: Sheet created successfully, total tabs now: {self.tabs.count()}")
             # Remove the blank '+' tab before adding the new sheet
             plus_index = self.tabs.count() - 1

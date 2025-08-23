@@ -46,6 +46,8 @@ class FileManager:
             tab_name = self.main_window.tabs.tabText(i)
             if tab_name == "+":  # Skip the plus tab
                 continue
+            if tab.type not in ("bank", "non_bank"):
+                continue
             # Only call .data() on real sheet tabs
             sheet_data = tab.data()
             try:
@@ -54,11 +56,6 @@ class FileManager:
 
                 # Get exchange rate if available
                 exchange_rate = getattr(tab, "exchange_rate", 1.0)
-                # Only save user-added rows for aggregate sheets (no generated data)
-                if tab_name in [
-                    "銷售收入", "銷售成本", "銀行費用", "利息收入", "董事往來",
-                ]:
-                    sheet_data = {"cells": {}, "spans": []}
 
                 sheet_info = {
                     "name": tab_name,
@@ -157,26 +154,6 @@ class FileManager:
                         if row < table.rowCount() and col < table.columnCount():
                             item = QTableWidgetItem(cell_value)
                             table.setItem(row, col, item)
-                elif sheet_type == "aggregate":
-                    if sheet_name == "銷售收入":
-                        table = self.main_window.sheet_manager.create_sales_sheet()
-                    elif sheet_name == "銷售成本":
-                        table = self.main_window.sheet_manager.create_cost_sheet()
-                    elif sheet_name == "銀行費用":
-                        table = self.main_window.sheet_manager.create_bank_fee_sheet()
-                    elif sheet_name == "利息收入":
-                        table = self.main_window.sheet_manager.create_interest_sheet()
-                    elif sheet_name == "應付費用":
-                        table = self.main_window.sheet_manager.create_payable_sheet()
-                    elif sheet_name == "董事往來":
-                        table = self.main_window.sheet_manager.create_director_sheet()
-                    else:
-                        logger.error(f"create unknown {sheet_type} sheet")
-                elif sheet_type == "payable_detail":
-                    table = self.main_window.sheet_manager.create_payable_detail_sheet(sheet_name)
-                else:
-                    table = self.main_window.sheet_manager.create_regular_sheet(sheet_name)
-
                 table.name = sheet_name
                 temp_sheets[sheet_name] = table
 
