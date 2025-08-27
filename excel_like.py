@@ -712,6 +712,7 @@ class ExcelLike(QMainWindow):
         self.period_from_input.setDate(QDate.currentDate().addMonths(-1))
         self.period_to_input.setDate(QDate.currentDate())
         self.sheet_manager.create_bank_sheet("HSBC-USD")
+        self.sheet_manager.create_bank_sheet("HSBC-HKD")
         self.sheet_manager.create_bank_sheet("HSBC-RMB")
         self.sheet_manager.create_bank_sheet("HSBC-EUR")
         self.sheet_manager.create_bank_sheet("HSBC-JPY")
